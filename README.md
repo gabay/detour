@@ -95,7 +95,7 @@ docker:
 | Docker/Swarm collector       | done    |
 | Label helpers                | done    |
 | Dynamic configuration builder | done   |
-| Compiler/merger              | planned |
+| Compiler/merger              | done    |
 | HTTP server                  | planned |
 
 ## How containers become routes
@@ -105,6 +105,17 @@ docker:
 - Server port: the `server.port` label, otherwise the lowest exposed port. A `server.url` label cannot be combined with a port or scheme.
 - Swarm: services without `lbswarm` route to each running task; with `traefik.swarm.lbswarm=true` they route to the service VIP. Entries without a network address are skipped.
 - Replicas of the same service (same name) merge into one load balancer with every replica as a server; identical routers are kept once. Conflicting definitions of the same router, service, etc. are removed and logged.
+
+## Static vs discovered configuration
+
+The compiler produces the configuration served to Traefik: the static `dynamic` section plus every discovered (container or Swarm) resource.
+
+- Static entries always win. A discovered resource whose kind and name already exist in the static configuration is dropped and logged as a warning (`dynamic entry dropped: static configuration takes precedence`). Each dropped entry logs one warning per poll.
+- Names are compared per kind, so a router `x` and a service `x` do not conflict.
+- A discovered router may point at a static service of the same name when that service was dropped; this is intentional.
+- TLS certificates are deduplicated by certificate and key file; static certificates come first.
+- Kinds checked: `http` routers, services, middlewares and serversTransports; `tcp` routers, services, middlewares and serversTransports; `udp` routers and services; `tls` options and stores.
+- A discovered HTTP router that references an unknown service or middleware is logged as a warning and kept. Names containing `@` (for example `api@internal`) are not checked.
 
 ## Docker access
 
