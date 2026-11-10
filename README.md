@@ -63,7 +63,7 @@ Durations accept Go duration strings (`"10s"`, `"2m"`) or a plain integer number
 | `replace` | `{{ replace "_" "-" "a_b" }}` | `a-b` |
 | `trimProject` | `{{ trimProject "project_container" }}` | `container` |
 
-`trimProject` returns the part after the last underscore, or the input unchanged when there is no underscore or the underscore is the last character. Note that `.Name` for containers carrying compose labels is `<service>_<project>` (service first, project last), so `trimProject` on such a name returns the project, not the service. It is meant for Swarm services and for plain container names such as `project_container`; for compose containers, use `.ContainerName` or `.Labels` instead.
+`trimProject` returns the part after the last underscore, or the input unchanged when there is no underscore or the underscore is the last character. Note that compose containers' name in this project is `<project>_<service>` (unlike in traefik's `<service>_<project>`), so using `trimProject` is correct on compose services as well.
 
 The global `server.updateInterval` drives polling for both containers and Swarm services.
 

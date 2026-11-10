@@ -17,11 +17,11 @@ func Normalize(name string) string {
 }
 
 // ServiceName returns the router and service base name for c. Compose containers
-// are named "<service>_<project>" so that they stay unique across projects.
+// are named "<project>_<service>" so that they stay unique across projects.
 func ServiceName(c docker.Container) string {
 	project, service := c.Labels[composeProjectLabel], c.Labels[composeServiceLabel]
 	if project != "" && service != "" {
-		return Normalize(service + "_" + project)
+		return Normalize(project + "_" + service)
 	}
 	return Normalize(c.ServiceName)
 }
