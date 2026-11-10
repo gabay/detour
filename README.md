@@ -96,8 +96,8 @@ docker:
 
 ```sh
 make build                       # produces ./detour
-cp config.example.yaml config.yaml
-./detour -config config.yaml     # serves on :7890 by default
+cp config.example.yaml detour.yaml
+./detour -config detour.yaml     # serves on :7890 by default
 curl -s http://localhost:7890/   # merged configuration as YAML
 ```
 
@@ -145,7 +145,7 @@ The configuration file is watched with inotify (via `fsnotify`) on its parent di
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-config` | `config.yaml` (or `$DETOUR_CONFIG`) | Configuration file path. |
+| `-config` | `detour.yaml` (or `$DETOUR_CONFIG`) | Configuration file path. |
 | `-log-level` | `info` | `debug`, `info`, `warn` or `error`. Request logs are at `debug`. |
 | `-log-format` | `text` | `text` or `json`. |
 | `-version` | | Print the version and exit. |
@@ -167,12 +167,12 @@ The version is injected with `-ldflags "-X detour/internal/docker.Version=<versi
 ```sh
 docker build --build-arg VERSION=0.1.0 -t detour:0.1.0 .
 docker run --rm -p 7890:7890 \
-  -v "$PWD/config.yaml:/etc/detour/config.yaml:ro" \
+  -v "$PWD/detour.yaml:/etc/detour/detour.yaml:ro" \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   detour:0.1.0
 ```
 
-The image is `gcr.io/distroless/static:nonroot` and only contains the binary. Mount the config at `/etc/detour/config.yaml`. The Docker socket must be readable by the non-root user, or use a socket proxy (see `docker-compose.example.yaml`, which runs Traefik, Detour and a `tecnativa/docker-socket-proxy` variant).
+The image is `gcr.io/distroless/static:nonroot` and only contains the binary. Mount the config at `/etc/detour/detour.yaml`. The Docker socket must be readable by the non-root user, or use a socket proxy (see `docker-compose.example.yaml`, which runs Traefik, Detour and a `tecnativa/docker-socket-proxy` variant).
 
 ## Traefik provider
 

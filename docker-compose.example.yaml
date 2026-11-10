@@ -19,7 +19,7 @@ services:
   detour:
     image: detour:dev
     volumes:
-      - ./detour.yaml:/etc/detour/config.yaml:ro
+      - ./detour.yaml:/etc/detour/detour.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     expose:
       - "7890"
@@ -43,7 +43,7 @@ services:
     image: detour:dev
     profiles: ["proxied"]
     volumes:
-      - ./detour-proxied.yaml:/etc/detour/config.yaml:ro
+      - ./detour-proxied.yaml:/etc/detour/detour.yaml:ro
     expose:
       - "7890"
     depends_on:

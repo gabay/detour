@@ -26,7 +26,7 @@ type harness struct {
 func start(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{t: t, dir: t.TempDir(), changes: make(chan struct{}, 64), done: make(chan error, 1)}
-	h.path = filepath.Join(h.dir, "config.yaml")
+	h.path = filepath.Join(h.dir, "detour.yaml")
 	if err := os.WriteFile(h.path, []byte("v0"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestBurstIsDebounced(t *testing.T) {
 
 func TestAtomicRenameReplace(t *testing.T) {
 	h := start(t)
-	tmp := filepath.Join(h.dir, ".config.yaml.tmp")
+	tmp := filepath.Join(h.dir, ".detour.yaml.tmp")
 	write(t, tmp, "v1")
 	if err := os.Rename(tmp, h.path); err != nil {
 		t.Fatal(err)
@@ -128,19 +128,19 @@ func TestUnrelatedFileIgnored(t *testing.T) {
 
 func TestKubernetesDataSymlinkSwap(t *testing.T) {
 	h := start(t)
-	// Lay out a ConfigMap volume: config.yaml -> ..data/config.yaml, ..data -> <timestamped dir>.
+	// Lay out a ConfigMap volume: detour.yaml -> ..data/detour.yaml, ..data -> <timestamped dir>.
 	v1 := filepath.Join(h.dir, "..2026_01_01")
 	if err := os.Mkdir(v1, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	write(t, filepath.Join(v1, "config.yaml"), "v1")
+	write(t, filepath.Join(v1, "detour.yaml"), "v1")
 	if err := os.Symlink("..2026_01_01", filepath.Join(h.dir, "..data")); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(h.path); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join("..data", "config.yaml"), h.path); err != nil {
+	if err := os.Symlink(filepath.Join("..data", "detour.yaml"), h.path); err != nil {
 		t.Fatal(err)
 	}
 	h.waitChange()
@@ -150,7 +150,7 @@ func TestKubernetesDataSymlinkSwap(t *testing.T) {
 	if err := os.Mkdir(v2, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	write(t, filepath.Join(v2, "config.yaml"), "v2")
+	write(t, filepath.Join(v2, "detour.yaml"), "v2")
 	tmpLink := filepath.Join(h.dir, "..data_tmp")
 	if err := os.Symlink("..2026_02_01", tmpLink); err != nil {
 		t.Fatal(err)
@@ -162,7 +162,7 @@ func TestKubernetesDataSymlinkSwap(t *testing.T) {
 }
 
 func TestMissingDirectoryReturnsError(t *testing.T) {
-	err := Watch(context.Background(), filepath.Join(t.TempDir(), "missing", "config.yaml"), debounce, func() {})
+	err := Watch(context.Background(), filepath.Join(t.TempDir(), "missing", "detour.yaml"), debounce, func() {})
 	if err == nil {
 		t.Fatal("want error for missing directory")
 	}

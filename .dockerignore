@@ -5,6 +5,6 @@ coverage.out
 detour
 README.md
 docker-compose*.yaml
-config.yaml
+detour.yaml
 Dockerfile
 deploy.sh

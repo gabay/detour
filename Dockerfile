@@ -12,6 +12,6 @@ RUN CGO_ENABLED=0 go build -trimpath \
 FROM gcr.io/distroless/static:nonroot
 COPY --from=build /out/detour /detour
 
-ENV DETOUR_CONFIG=/detour.yaml
+ENV DETOUR_CONFIG=/etc/detour/detour.yaml
 EXPOSE 7890
 ENTRYPOINT ["/detour"]

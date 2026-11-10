@@ -94,7 +94,7 @@ func writeConfig(t *testing.T, path, content string) {
 }
 
 func TestConfigFileReloadEndToEnd(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
+	path := filepath.Join(t.TempDir(), "detour.yaml")
 	writeConfig(t, path, routerYAML("first"))
 	cfg, err := config.LoadFile(path)
 	if err != nil {

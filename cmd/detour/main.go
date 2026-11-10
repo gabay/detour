@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	defaultConfigPath = "config.yaml"
+	defaultConfigPath = "detour.yaml"
 	reloadDebounce    = 250 * time.Millisecond
 )
 
