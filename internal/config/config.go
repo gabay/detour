@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"detour/internal/constraints"
 	"detour/internal/dynamic"
 
 	"gopkg.in/yaml.v3"
@@ -157,6 +158,9 @@ func (c *Config) Validate() error {
 	}
 	if d.TLS != nil && (d.TLS.Cert == "") != (d.TLS.Key == "") {
 		errs = append(errs, errors.New("docker.tls.cert and docker.tls.key must be set together"))
+	}
+	if err := constraints.Validate(d.Constraints); err != nil {
+		errs = append(errs, fmt.Errorf("docker.constraints: %w", err))
 	}
 	return errors.Join(errs...)
 }

@@ -65,6 +65,27 @@ The global `server.updateInterval` drives polling for both containers and Swarm 
 
 Optional. Static Traefik dynamic configuration (`http`, `tcp`, `udp`, `tls` sections) in Traefik's own format. Use it for objects that are not backed by a container, such as a service pointing at an external host. Entries here win over Docker/Swarm entries with the same name.
 
+## Docker labels
+
+Containers and Swarm services control their routing with these labels:
+
+| Label                            | Applies to        | Meaning |
+|----------------------------------|-------------------|---------|
+| `traefik.enable`                 | containers, swarm | `true`/`false`; overrides `exposedByDefault` |
+| `traefik.docker.network`         | containers        | Network used for the backend address |
+| `traefik.docker.allownonrunning` | containers        | Keep the container even if it is not running |
+| `traefik.swarm.lbswarm`          | swarm             | Route through the service VIP instead of task addresses |
+| `traefik.swarm.network`          | swarm             | Network used for the backend address |
+
+For Swarm services, `traefik.docker.lbswarm` and `traefik.docker.network` are accepted as deprecated aliases, but a service must not mix `traefik.docker.*` and `traefik.swarm.*` labels.
+
+`docker.constraints` takes a Traefik-style expression built from `Label(name, value)` and `LabelRegex(name, regex)`, combined with `&&`, `||`, `!` and parentheses. An empty value matches all containers. The expression is validated at startup.
+
+```yaml
+docker:
+  constraints: 'Label("traefik.constraint", "public") || !LabelRegex("env", "^dev")'
+```
+
 ## Status
 
 | Component                    | Status  |
@@ -72,6 +93,7 @@ Optional. Static Traefik dynamic configuration (`http`, `tcp`, `udp`, `tls` sect
 | `internal/dynamic`           | done    |
 | Config loader                | done    |
 | Docker/Swarm collector       | done    |
+| Label helpers                | done    |
 | Compiler/merger              | planned |
 | HTTP server                  | planned |
 

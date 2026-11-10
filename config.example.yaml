@@ -48,7 +48,8 @@ docker:
   network: ""
   # Router rule generated when a container has no explicit rule.
   defaultRule: "Host(`{{ normalize .Name }}`)"
-  # Only containers matching this Traefik constraint expression are used.
+  # Only containers matching this constraint expression are used, e.g.
+  # Label("traefik.constraint", "public") || !LabelRegex("env", "^dev").
   constraints: ""
   # Use the IP from the published port binding instead of the container IP.
   useBindPortIP: false
