@@ -1,0 +1,85 @@
+# Detour configuration example.
+#
+# Every option is shown with its default value. Durations accept Go duration
+# strings ("10s", "2m", "500ms") or a plain integer number of seconds (10).
+# The file is read once at startup; restart Detour to apply changes.
+
+server:
+  # Address the HTTP provider endpoint listens on.
+  listenAddr: ":7890"
+  # Path Traefik polls for the merged dynamic configuration. Must start with "/".
+  endpointPath: "/"
+  # How often Docker containers and Swarm services are polled for labels.
+  # Applies to both sources. Must be greater than 0.
+  updateInterval: 10s
+  # Discovered entries not refreshed within this window are dropped.
+  # Must be greater than 0.
+  staleDuration: 1m
+
+docker:
+  # Which label sources are collected:
+  #   docker - containers only (default; also used when empty)
+  #   swarm  - Swarm services only
+  #   both   - containers and Swarm services
+  #   off    - neither
+  # The explicit "containers" and "swarm" booleans below override the mode
+  # for that source, even when the combination is contradictory.
+  mode: docker
+  # containers: true
+  # swarm: false
+
+  # Docker API endpoint. Supported schemes: unix, tcp, http, https.
+  endpoint: "unix:///var/run/docker.sock"
+  # Timeout for each Docker API request. Must be greater than 0.
+  timeout: 5s
+  # Basic auth for socket proxies. Set both or neither.
+  # username: ""
+  # password: ""
+  # TLS settings for the Docker API endpoint (file paths).
+  # tls:
+  #   ca: /etc/detour/certs/ca.pem
+  #   cert: /etc/detour/certs/client.pem   # set together with key
+  #   key: /etc/detour/certs/client-key.pem
+  #   insecureSkipVerify: false
+
+  # Expose containers without traefik.enable=true (default false).
+  exposedByDefault: false
+  # Network used to reach containers when several are attached.
+  network: ""
+  # Router rule generated when a container has no explicit rule.
+  defaultRule: "Host(`{{ normalize .Name }}`)"
+  # Only containers matching this Traefik constraint expression are used.
+  constraints: ""
+  # Use the IP from the published port binding instead of the container IP.
+  useBindPortIP: false
+  # Keep services that have no endpoints instead of dropping them.
+  allowEmptyServices: false
+
+# Static dynamic configuration, in Traefik's dynamic-configuration format.
+# Entries here win over Docker/Swarm entries with the same name
+# (for example, a router called "app" here replaces one generated from labels).
+dynamic:
+  http:
+    routers:
+      legacy-app:
+        entryPoints: ["websecure"]
+        rule: "Host(`legacy.example.com`)"
+        service: legacy-app
+        middlewares: ["legacy-strip"]
+        tls:
+          options: modern
+    services:
+      legacy-app:
+        loadBalancer:
+          servers:
+            - url: "http://192.168.1.10:8080"
+    middlewares:
+      legacy-strip:
+        stripPrefix:
+          prefixes: ["/legacy"]
+  tls:
+    options:
+      # Referenced from a router via tls.options: modern
+      modern:
+        minVersion: VersionTLS12
+        sniStrict: true
