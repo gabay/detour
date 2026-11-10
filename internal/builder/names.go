@@ -1,10 +1,8 @@
 package builder
 
 import (
-	"strings"
-	"unicode"
-
 	"detour/internal/docker"
+	"detour/internal/rule"
 )
 
 const (
@@ -15,7 +13,7 @@ const (
 // Normalize replaces every run of characters that are neither letters nor digits
 // with a single "-" and trims leading and trailing separators.
 func Normalize(name string) string {
-	return strings.Join(strings.FieldsFunc(name, notLetterOrDigit), "-")
+	return rule.Normalize(name)
 }
 
 // ServiceName returns the router and service base name for c. Compose containers
@@ -26,8 +24,4 @@ func ServiceName(c docker.Container) string {
 		return Normalize(service + "_" + project)
 	}
 	return Normalize(c.ServiceName)
-}
-
-func notLetterOrDigit(r rune) bool {
-	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 }

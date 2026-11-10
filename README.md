@@ -94,8 +94,17 @@ docker:
 | Config loader                | done    |
 | Docker/Swarm collector       | done    |
 | Label helpers                | done    |
+| Dynamic configuration builder | done   |
 | Compiler/merger              | planned |
 | HTTP server                  | planned |
+
+## How containers become routes
+
+- Each container (or Swarm entry) decodes its `traefik.*` labels into its own configuration; the results are merged in name order.
+- Without router labels, one router is created with the `docker.defaultRule` template (default ``Host(`{{ normalize .Name }}`)``), but only when the container defines at most one service. With no service labels, a default service is created.
+- Server port: the `server.port` label, otherwise the lowest exposed port. A `server.url` label cannot be combined with a port or scheme.
+- Swarm: services without `lbswarm` route to each running task; with `traefik.swarm.lbswarm=true` they route to the service VIP. Entries without a network address are skipped.
+- Replicas of the same service (same name) merge into one load balancer with every replica as a server; identical routers are kept once. Conflicting definitions of the same router, service, etc. are removed and logged.
 
 ## Docker access
 

@@ -15,6 +15,7 @@ import (
 
 	"detour/internal/constraints"
 	"detour/internal/dynamic"
+	"detour/internal/rule"
 
 	"gopkg.in/yaml.v3"
 )
@@ -161,6 +162,9 @@ func (c *Config) Validate() error {
 	}
 	if err := constraints.Validate(d.Constraints); err != nil {
 		errs = append(errs, fmt.Errorf("docker.constraints: %w", err))
+	}
+	if _, err := rule.Parse(d.DefaultRule); err != nil {
+		errs = append(errs, fmt.Errorf("docker.defaultRule: %w", err))
 	}
 	return errors.Join(errs...)
 }

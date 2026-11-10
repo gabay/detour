@@ -166,6 +166,8 @@ func TestValidationErrors(t *testing.T) {
 		{"password without user", "docker:\n  password: secret\n", "docker.username"},
 		{"bad endpointPath", "server:\n  endpointPath: traefik\n", "server.endpointPath"},
 		{"unknown mode", "docker:\n  mode: kubernetes\n", "docker.mode"},
+		{"unparsable default rule", "docker:\n  defaultRule: 'Host(`{{ normalize .Name`)'\n", "docker.defaultRule"},
+		{"unknown rule function", "docker:\n  defaultRule: '{{ bogus .Name }}'\n", "docker.defaultRule"},
 		{"zero docker timeout", "docker:\n  timeout: 0s\n", "docker.timeout"},
 		{"unknown field", "server:\n  bogus: 1\n", "bogus"},
 		{"unknown top-level field", "serverr:\n  listenAddr: \":1\"\n", "serverr"},
