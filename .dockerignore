@@ -6,3 +6,5 @@ detour
 README.md
 docker-compose*.yaml
 config.yaml
+Dockerfile
+deploy.sh
