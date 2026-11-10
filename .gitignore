@@ -1,0 +1,8 @@
+# Binaries and test artifacts
+/detour
+*.test
+coverage.out
+
+# Editors
+.idea
+.vscode
