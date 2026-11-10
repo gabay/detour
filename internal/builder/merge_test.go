@@ -16,7 +16,7 @@ func httpConf(routers map[string]*dynamic.Router, services map[string]*dynamic.S
 
 func lb(urls ...string) *dynamic.Service {
 	svc := &dynamic.Service{LoadBalancer: &dynamic.ServersLoadBalancer{}}
-	svc.LoadBalancer.SetDefaults()
+
 	for _, u := range urls {
 		svc.LoadBalancer.Servers = append(svc.LoadBalancer.Servers, dynamic.Server{URL: u})
 	}
@@ -36,7 +36,7 @@ func TestMerge(t *testing.T) {
 				{Name: "b", Configuration: httpConf(nil, map[string]*dynamic.Service{"svc": lb("http://b:80")})},
 				{Name: "a", Configuration: httpConf(nil, map[string]*dynamic.Service{"svc": lb("http://a:80")})},
 			},
-			wantJSON: `{"http":{"services":{"svc":{"loadBalancer":{"servers":[{"url":"http://a:80"},{"url":"http://b:80"}],"passHostHeader":true}}}}}`,
+			wantJSON: `{"http":{"services":{"svc":{"loadBalancer":{"servers":[{"url":"http://a:80"},{"url":"http://b:80"}]}}}}}`,
 		},
 		{
 			name: "identical routers kept without conflict",

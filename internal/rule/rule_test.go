@@ -37,6 +37,41 @@ func TestParseAndExecute(t *testing.T) {
 	}
 }
 
+func TestTrimProject(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		{"project container", "project_container", "container"},
+		{"stack service name", "stack_service_name", "name"},
+		{"last underscore wins", "a_b_c", "c"},
+		{"no underscore", "plain", "plain"},
+		{"trailing underscore unchanged", "name_", "name_"},
+		{"leading underscore", "_x", "x"},
+		{"empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := TrimProject(tt.in); got != tt.want {
+				t.Errorf("TrimProject(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTrimProjectInTemplate(t *testing.T) {
+	tpl, err := Parse("Host(`{{ trimProject .Name | normalize }}.example.com`)")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	got, err := Execute(tpl, RuleModel{Name: "myproj_web_app"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if want := "Host(`app.example.com`)"; got != want {
+		t.Errorf("Execute = %q, want %q", got, want)
+	}
+}
+
 func TestNormalize(t *testing.T) {
 	for in, want := range map[string]string{"--a_b..c--": "a-b-c", "plain": "plain", "x  y": "x-y"} {
 		if got := Normalize(in); got != want {

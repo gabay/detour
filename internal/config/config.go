@@ -37,11 +37,10 @@ type ServerConfig struct {
 
 // DockerConfig configures the Docker and Swarm label sources.
 type DockerConfig struct {
-	// Mode is one of docker, swarm, both, off or empty (treated as docker).
-	Mode string `yaml:"mode"`
-	// Containers and Swarm, when set, override the baseline derived from Mode.
-	Containers *bool `yaml:"containers"`
-	Swarm      *bool `yaml:"swarm"`
+	// Containers enables collecting labels from Docker containers.
+	Containers bool `yaml:"containers"`
+	// Swarm enables collecting labels from Swarm services.
+	Swarm bool `yaml:"swarm"`
 
 	Endpoint string           `yaml:"endpoint"`
 	Timeout  Duration         `yaml:"timeout"`
@@ -83,7 +82,8 @@ func Default() *Config {
 			StaleDuration:  Duration(time.Minute),
 		},
 		Docker: DockerConfig{
-			Mode:        "docker",
+			Containers:  true,
+			Swarm:       false,
 			Endpoint:    defaultEndpoint,
 			Timeout:     Duration(5 * time.Second),
 			DefaultRule: defaultDefaultRule,
@@ -140,11 +140,6 @@ func (c *Config) Validate() error {
 	}
 
 	d := c.Docker
-	switch d.Mode {
-	case "", "docker", "swarm", "both", "off":
-	default:
-		errs = append(errs, fmt.Errorf("docker.mode: unknown value %q (want docker, swarm, both or off)", d.Mode))
-	}
 	if scheme, rest, ok := strings.Cut(d.Endpoint, "://"); !ok || rest == "" {
 		errs = append(errs, fmt.Errorf("docker.endpoint: %q must have the form scheme://address", d.Endpoint))
 	} else {
@@ -170,24 +165,6 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("docker.defaultRule: %w", err))
 	}
 	return errors.Join(errs...)
-}
-
-// ContainersEnabled reports whether Docker container labels are collected.
-// An explicit containers boolean wins over the mode baseline.
-func (d DockerConfig) ContainersEnabled() bool {
-	if d.Containers != nil {
-		return *d.Containers
-	}
-	return d.Mode == "" || d.Mode == "docker" || d.Mode == "both"
-}
-
-// SwarmEnabled reports whether Swarm service labels are collected.
-// An explicit swarm boolean wins over the mode baseline.
-func (d DockerConfig) SwarmEnabled() bool {
-	if d.Swarm != nil {
-		return *d.Swarm
-	}
-	return d.Mode == "swarm" || d.Mode == "both"
 }
 
 // Duration is a time.Duration that accepts Go duration strings ("30s", "2m")

@@ -91,8 +91,6 @@ func newFake() *fakeAPI {
 	}
 }
 
-func boolPtr(b bool) *bool { return &b }
-
 func ctrInspect(id, name, state string, labels map[string]string) container.InspectResponse {
 	return container.InspectResponse{
 		ID:         id,
@@ -265,7 +263,7 @@ func TestCollectContainers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFake()
 			tt.setup(f)
-			cfg := config.DockerConfig{Mode: "docker"}
+			cfg := config.DockerConfig{Containers: true}
 			got, err := NewCollector(f, cfg).Collect(context.Background())
 			if tt.wantErr {
 				if err == nil || got != nil {
@@ -353,7 +351,7 @@ func swarmFixture() *fakeAPI {
 
 func TestCollectSwarm(t *testing.T) {
 	f := swarmFixture()
-	got, err := NewCollector(f, config.DockerConfig{Mode: "swarm"}).Collect(context.Background())
+	got, err := NewCollector(f, config.DockerConfig{Swarm: true}).Collect(context.Background())
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
@@ -421,7 +419,7 @@ func TestCollectSwarm(t *testing.T) {
 
 func TestCollectSwarmNodeLookupCached(t *testing.T) {
 	f := swarmFixture()
-	if _, err := NewCollector(f, config.DockerConfig{Mode: "swarm"}).Collect(context.Background()); err != nil {
+	if _, err := NewCollector(f, config.DockerConfig{Swarm: true}).Collect(context.Background()); err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
 	// node1 hosts web.1 and agent task; it must be inspected once.
@@ -437,7 +435,7 @@ func TestCollectSwarmNodeLookupCached(t *testing.T) {
 func TestCollectSwarmNodeFailureSkipsTask(t *testing.T) {
 	f := swarmFixture()
 	delete(f.nodes, "node2")
-	got, err := NewCollector(f, config.DockerConfig{Mode: "swarm"}).Collect(context.Background())
+	got, err := NewCollector(f, config.DockerConfig{Swarm: true}).Collect(context.Background())
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
@@ -460,7 +458,7 @@ func TestCollectSwarmListFailures(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := swarmFixture()
 			tt.setup(f)
-			got, err := NewCollector(f, config.DockerConfig{Mode: "swarm"}).Collect(context.Background())
+			got, err := NewCollector(f, config.DockerConfig{Swarm: true}).Collect(context.Background())
 			if err == nil || got != nil {
 				t.Fatalf("want error and nil result, got %d entries, err %v", len(got), err)
 			}
@@ -474,7 +472,7 @@ func TestCollectBothFailingSourceReturnsError(t *testing.T) {
 	f.inspect = map[string]container.InspectResponse{"id-b": ctrInspect("id-b", "b", "running", nil)}
 	f.serviceErr = errors.New("swarm unavailable")
 
-	got, err := NewCollector(f, config.DockerConfig{Mode: "both"}).Collect(context.Background())
+	got, err := NewCollector(f, config.DockerConfig{Containers: true, Swarm: true}).Collect(context.Background())
 	if err == nil {
 		t.Fatal("want error when swarm listing fails")
 	}
@@ -487,7 +485,7 @@ func TestCollectBothEnabled(t *testing.T) {
 	f := swarmFixture()
 	f.containers = []container.Summary{{ID: "id-b"}}
 	f.inspect = map[string]container.InspectResponse{"id-b": ctrInspect("id-b", "b-local", "running", nil)}
-	got, err := NewCollector(f, config.DockerConfig{Mode: "both"}).Collect(context.Background())
+	got, err := NewCollector(f, config.DockerConfig{Containers: true, Swarm: true}).Collect(context.Background())
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
@@ -506,8 +504,7 @@ func TestCollectDisabledMakesNoCalls(t *testing.T) {
 		name string
 		cfg  config.DockerConfig
 	}{
-		{"mode off", config.DockerConfig{Mode: "off"}},
-		{"containers and swarm explicitly false", config.DockerConfig{Mode: "both", Containers: boolPtr(false), Swarm: boolPtr(false)}},
+		{"both disabled", config.DockerConfig{Containers: false, Swarm: false}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -534,7 +531,7 @@ func TestCollectDeterministicOrder(t *testing.T) {
 		"id-1": ctrInspect("id-1", "same", "running", nil),
 		"id-2": ctrInspect("id-2", "same", "running", nil),
 	}
-	c := NewCollector(f, config.DockerConfig{Mode: "docker"})
+	c := NewCollector(f, config.DockerConfig{Containers: true})
 	for range 5 {
 		got, err := c.Collect(context.Background())
 		if err != nil {
@@ -552,10 +549,10 @@ func TestCollectContextCanceled(t *testing.T) {
 	f.inspect = map[string]container.InspectResponse{"id-b": ctrInspect("id-b", "b", "running", nil)}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	for _, mode := range []string{"docker", "swarm", "both"} {
-		got, err := NewCollector(f, config.DockerConfig{Mode: mode}).Collect(ctx)
+	for _, cfg := range []config.DockerConfig{{Containers: true}, {Swarm: true}, {Containers: true, Swarm: true}} {
+		got, err := NewCollector(f, cfg).Collect(ctx)
 		if !errors.Is(err, context.Canceled) || got != nil {
-			t.Errorf("mode %s: got %v, %v; want context.Canceled", mode, got, err)
+			t.Errorf("config %+v: got %v, %v; want context.Canceled", cfg, got, err)
 		}
 	}
 }

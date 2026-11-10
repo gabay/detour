@@ -70,27 +70,27 @@ func TestBuild(t *testing.T) {
 			name:       "labelled service and router",
 			containers: []docker.Container{ctr("web", "10.0.0.2", labels(appPort, "80", appRouter, hostA))},
 			want: `{"http":{"routers":{"app":{"rule":"` + hostA + `","service":"app"}},
-				"services":{"app":{"loadBalancer":{"servers":[{"url":"http://10.0.0.2:80"}],"passHostHeader":true}}}}}`,
+				"services":{"app":{"loadBalancer":{"servers":[{"url":"http://10.0.0.2:80"}]}}}}}`,
 		},
 		{
 			name:       "default router and service from lowest port",
 			containers: []docker.Container{ctr("web", "10.0.0.2", labels())},
 			want: `{"http":{"routers":{"web":{"rule":"Host(` + "`web`" + `)","service":"web"}},
-				"services":{"web":{"loadBalancer":{"servers":[{"url":"http://10.0.0.2:8080"}],"passHostHeader":true}}}}}`,
+				"services":{"web":{"loadBalancer":{"servers":[{"url":"http://10.0.0.2:8080"}]}}}}}`,
 		},
 		{
 			name: "several services and no router creates none",
 			containers: []docker.Container{ctr("web", "10.0.0.2", labels(
 				appPort, "80", "traefik.http.services.b.loadbalancer.server.port", "81"))},
-			want: `{"http":{"services":{"app":{"loadBalancer":{"servers":[{"url":"http://10.0.0.2:80"}],"passHostHeader":true}},
-				"b":{"loadBalancer":{"servers":[{"url":"http://10.0.0.2:81"}],"passHostHeader":true}}}}}`,
+			want: `{"http":{"services":{"app":{"loadBalancer":{"servers":[{"url":"http://10.0.0.2:80"}]}},
+				"b":{"loadBalancer":{"servers":[{"url":"http://10.0.0.2:81"}]}}}}}`,
 		},
 		{
 			name: "stopped with allownonrunning keeps an empty backend",
 			containers: []docker.Container{{ID: "web", Name: "web", ServiceName: "web", Status: "exited",
 				Labels: labels("traefik.docker.allownonrunning", "true")}},
 			want: `{"http":{"routers":{"web":{"rule":"Host(` + "`web`" + `)","service":"web"}},
-				"services":{"web":{"loadBalancer":{"passHostHeader":true}}}}}`,
+				"services":{"web":{"loadBalancer":{}}}}}`,
 		},
 		{
 			name: "stopped container is dropped",
@@ -104,7 +104,7 @@ func TestBuild(t *testing.T) {
 			containers: []docker.Container{{ID: "web", Name: "web", ServiceName: "web", Status: "running",
 				Health: "unhealthy", Labels: labels()}},
 			want: `{"http":{"routers":{"web":{"rule":"Host(` + "`web`" + `)","service":"web"}},
-				"services":{"web":{"loadBalancer":{"passHostHeader":true}}}}}`,
+				"services":{"web":{"loadBalancer":{}}}}}`,
 		},
 		{
 			name: "unhealthy dropped by default",
@@ -120,8 +120,8 @@ func TestBuild(t *testing.T) {
 					"traefik.http.routers.api.rule", hostA)),
 			},
 			want: `{"http":{"routers":{"api":{"rule":"` + hostA + `","service":"api"},"app":{"rule":"` + hostA + `","service":"app"}},
-				"services":{"app":{"loadBalancer":{"servers":[{"url":"https://10.0.0.2:443"}],"passHostHeader":true}},
-				"api":{"loadBalancer":{"servers":[{"url":"http://backend:9000"}],"passHostHeader":true}}}}}`,
+				"services":{"app":{"loadBalancer":{"servers":[{"url":"https://10.0.0.2:443"}]}},
+				"api":{"loadBalancer":{"servers":[{"url":"http://backend:9000"}]}}}}}`,
 		},
 		{
 			name: "URL combined with port drops the container",
@@ -136,7 +136,7 @@ func TestBuild(t *testing.T) {
 				ctr("web-b", "10.0.0.3", labels(appPort, "80", appRouter, hostA)),
 			},
 			want: `{"http":{"routers":{"app":{"rule":"` + hostA + `","service":"app"}},
-				"services":{"app":{"loadBalancer":{"servers":[{"url":"http://10.0.0.2:80"},{"url":"http://10.0.0.3:80"}],"passHostHeader":true}}}}}`,
+				"services":{"app":{"loadBalancer":{"servers":[{"url":"http://10.0.0.2:80"},{"url":"http://10.0.0.3:80"}]}}}}}`,
 		},
 		{
 			name: "TCP router and service",
@@ -163,7 +163,7 @@ func TestBuild(t *testing.T) {
 				"traefik.http.routers.app.middlewares", "strip", "traefik.http.middlewares.strip.stripprefix.prefixes", "/api"))},
 			want: `{"http":{"routers":{"app":{"rule":"` + hostA + `","service":"app","middlewares":["strip"]}},
 				"middlewares":{"strip":{"stripPrefix":{"prefixes":["/api"]}}},
-				"services":{"app":{"loadBalancer":{"servers":[{"url":"http://10.0.0.2:80"}],"passHostHeader":true}}}}}`,
+				"services":{"app":{"loadBalancer":{"servers":[{"url":"http://10.0.0.2:80"}]}}}}}`,
 		},
 		{
 			name: "swarm tasks used, VIP ignored",
@@ -173,7 +173,7 @@ func TestBuild(t *testing.T) {
 				swarmEntry("vip", "10.0.1.5", true, labels(appPort, "80", appRouter, hostA)),
 			},
 			want: `{"http":{"routers":{"app":{"rule":"` + hostA + `","service":"app"}},
-				"services":{"app":{"loadBalancer":{"servers":[{"url":"http://10.0.0.2:80"},{"url":"http://10.0.0.3:80"}],"passHostHeader":true}}}}}`,
+				"services":{"app":{"loadBalancer":{"servers":[{"url":"http://10.0.0.2:80"},{"url":"http://10.0.0.3:80"}]}}}}}`,
 		},
 		{
 			name: "swarm lbswarm uses the VIP only",
@@ -182,7 +182,7 @@ func TestBuild(t *testing.T) {
 				swarmEntry("vip", "10.0.1.5", true, labels("traefik.swarm.lbswarm", "true", appPort, "80", appRouter, hostA)),
 			},
 			want: `{"http":{"routers":{"app":{"rule":"` + hostA + `","service":"app"}},
-				"services":{"app":{"loadBalancer":{"servers":[{"url":"http://10.0.1.5:80"}],"passHostHeader":true}}}}}`,
+				"services":{"app":{"loadBalancer":{"servers":[{"url":"http://10.0.1.5:80"}]}}}}}`,
 		},
 		{
 			name: "swarm VIP without network is skipped",

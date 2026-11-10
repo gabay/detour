@@ -21,6 +21,7 @@ func TestDefaults(t *testing.T) {
 	}
 	if want.Docker.Endpoint != "unix:///var/run/docker.sock" || want.Docker.Timeout.Std() != 5*time.Second ||
 		want.Docker.DefaultRule != "Host(`{{ normalize .Name }}`)" || want.Docker.ExposedByDefault ||
+		!want.Docker.Containers || want.Docker.Swarm ||
 		want.Dynamic != nil || want.Docker.TLS != nil {
 		t.Fatalf("unexpected docker defaults: %+v", want.Docker)
 	}
@@ -38,25 +39,20 @@ func TestDefaults(t *testing.T) {
 	}
 }
 
-func TestModeResolution(t *testing.T) {
+func TestSourceBooleans(t *testing.T) {
 	tests := []struct {
 		name         string
 		yaml         string
 		wantC, wantS bool
 	}{
-		{"empty document", "", true, false},
-		{"mode docker", "docker:\n  mode: docker\n", true, false},
-		{"mode swarm", "docker:\n  mode: swarm\n", false, true},
-		{"mode both", "docker:\n  mode: both\n", true, true},
-		{"mode off", "docker:\n  mode: off\n", false, false},
-		{"empty mode is docker", "docker:\n  mode: \"\"\n", true, false},
-		{"swarm true, no mode keeps docker baseline", "docker:\n  swarm: true\n", true, true},
-		{"off with containers override", "docker:\n  mode: off\n  containers: true\n", true, false},
-		{"off with swarm override", "docker:\n  mode: off\n  swarm: true\n", false, true},
-		{"docker with swarm override", "docker:\n  mode: docker\n  swarm: true\n", true, true},
-		{"both with containers disabled", "docker:\n  mode: both\n  containers: false\n", false, true},
-		{"swarm with containers forced on, swarm off (contradiction)", "docker:\n  mode: swarm\n  containers: true\n  swarm: false\n", true, false},
-		{"docker with containers off and swarm off", "docker:\n  mode: docker\n  containers: false\n  swarm: false\n", false, false},
+		{"empty document keeps defaults", "", true, false},
+		{"both omitted keeps defaults", "docker:\n  endpoint: tcp://h:2375\n", true, false},
+		{"containers only", "docker:\n  containers: true\n  swarm: false\n", true, false},
+		{"swarm only", "docker:\n  containers: false\n  swarm: true\n", false, true},
+		{"both enabled", "docker:\n  containers: true\n  swarm: true\n", true, true},
+		{"both disabled", "docker:\n  containers: false\n  swarm: false\n", false, false},
+		{"swarm enabled, containers omitted keeps default on", "docker:\n  swarm: true\n", true, true},
+		{"containers disabled, swarm omitted keeps default off", "docker:\n  containers: false\n", false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -64,11 +60,11 @@ func TestModeResolution(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Parse: %v", err)
 			}
-			if got := cfg.Docker.ContainersEnabled(); got != tt.wantC {
-				t.Errorf("ContainersEnabled() = %v, want %v", got, tt.wantC)
+			if cfg.Docker.Containers != tt.wantC {
+				t.Errorf("Containers = %v, want %v", cfg.Docker.Containers, tt.wantC)
 			}
-			if got := cfg.Docker.SwarmEnabled(); got != tt.wantS {
-				t.Errorf("SwarmEnabled() = %v, want %v", got, tt.wantS)
+			if cfg.Docker.Swarm != tt.wantS {
+				t.Errorf("Swarm = %v, want %v", cfg.Docker.Swarm, tt.wantS)
 			}
 		})
 	}
@@ -166,7 +162,7 @@ func TestValidationErrors(t *testing.T) {
 		{"password without user", "docker:\n  password: secret\n", "docker.username"},
 		{"bad endpointPath", "server:\n  endpointPath: traefik\n", "server.endpointPath"},
 		{"endpointPath reserved for healthz", "server:\n  endpointPath: /healthz\n", "server.endpointPath"},
-		{"unknown mode", "docker:\n  mode: kubernetes\n", "docker.mode"},
+		{"mode key is no longer supported", "docker:\n  mode: both\n", "mode"},
 		{"unparsable default rule", "docker:\n  defaultRule: 'Host(`{{ normalize .Name`)'\n", "docker.defaultRule"},
 		{"unknown rule function", "docker:\n  defaultRule: '{{ bogus .Name }}'\n", "docker.defaultRule"},
 		{"zero docker timeout", "docker:\n  timeout: 0s\n", "docker.timeout"},

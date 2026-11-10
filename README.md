@@ -28,9 +28,8 @@ Durations accept Go duration strings (`"10s"`, `"2m"`) or a plain integer number
 
 | Key                 | Default                       | Description |
 |---------------------|-------------------------------|-------------|
-| `mode`              | `docker`                      | Label sources: `docker`, `swarm`, `both`, `off` (empty means `docker`). |
-| `containers`        | from `mode`                   | Explicit boolean; overrides whether container labels are collected. |
-| `swarm`             | from `mode`                   | Explicit boolean; overrides whether Swarm service labels are collected. |
+| `containers`        | `true`                        | Collect labels from Docker containers. |
+| `swarm`             | `false`                       | Collect labels from Docker Swarm services. |
 | `endpoint`          | `unix:///var/run/docker.sock` | Docker API endpoint. Scheme must be `unix`, `tcp`, `http` or `https`. |
 | `timeout`           | `5s`                          | Timeout per Docker API request. Must be > 0. |
 | `username`          |                               | Basic auth for socket proxies. Set together with `password`. |
@@ -41,23 +40,30 @@ Durations accept Go duration strings (`"10s"`, `"2m"`) or a plain integer number
 | `tls.insecureSkipVerify` | `false`                  | Skip server certificate verification. |
 | `exposedByDefault`  | `false`                       | Expose containers that lack `traefik.enable=true`. |
 | `network`           |                               | Network used to reach containers attached to several networks. |
-| `defaultRule`       | ``Host(`{{ normalize .Name }}`)`` | Router rule generated when a container sets none. |
+| `defaultRule`       | ``Host(`{{ normalize .Name }}`)`` | Router rule template generated when a container sets none. See [default rule functions](#default-rule-functions). |
 | `constraints`       |                               | Only containers matching this Traefik constraint expression are used. |
 | `useBindPortIP`     | `false`                       | Use the IP from the published port binding instead of the container IP. |
 | `allowEmptyServices`| `false`                       | Keep services with no endpoints instead of dropping them. |
 
-#### Docker/Swarm mode rules
+#### Label sources
 
-`mode` sets the baseline for each source:
+`containers` and `swarm` are independent booleans that select the label sources. Any combination is valid; with both `false`, Detour publishes only the static `dynamic` section and contacts no Docker API. The keys are strict: a leftover `mode:` key is rejected at startup as an unknown field.
 
-| `mode`   | Containers | Swarm |
-|----------|------------|-------|
-| `docker` (or empty) | on  | off |
-| `swarm`  | off        | on    |
-| `both`   | on         | on    |
-| `off`    | off        | off   |
+#### Default rule functions
 
-An explicit `containers` or `swarm` boolean overrides the baseline for that source only. Contradictory combinations are allowed and the boolean wins: for example, `mode: swarm` with `containers: true` collects both containers and Swarm services, and `mode: both` with `swarm: false` collects only containers. Since the boolean always wins, the baseline is only relevant when a boolean is not set.
+`docker.defaultRule` is a Go `text/template` executed with `.Name`, `.ContainerName` and `.Labels`. Available functions:
+
+| Function | Example | Result |
+|----------|---------|--------|
+| `normalize` | `{{ normalize "My_App.web" }}` | `My-App-web` |
+| `lower` | `{{ lower "App" }}` | `app` |
+| `upper` | `{{ upper "app" }}` | `APP` |
+| `trimPrefix` | `{{ trimPrefix "x-" "x-app" }}` | `app` |
+| `trimSuffix` | `{{ trimSuffix "-x" "app-x" }}` | `app` |
+| `replace` | `{{ replace "_" "-" "a_b" }}` | `a-b` |
+| `trimProject` | `{{ trimProject "project_container" }}` | `container` |
+
+`trimProject` returns the part after the last underscore, or the input unchanged when there is no underscore or the underscore is the last character. Note that `.Name` for containers carrying compose labels is `<service>_<project>` (service first, project last), so `trimProject` on such a name returns the project, not the service. It is meant for Swarm services and for plain container names such as `project_container`; for compose containers, use `.ContainerName` or `.Labels` instead.
 
 The global `server.updateInterval` drives polling for both containers and Swarm services.
 

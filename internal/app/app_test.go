@@ -104,8 +104,8 @@ func TestRefreshMergesStaticAndDiscovered(t *testing.T) {
 	}
 }
 
-func TestRefreshModeOffPublishesStaticOnly(t *testing.T) {
-	cfgYAML := "docker:\n  mode: off\n" + staticYAML
+func TestRefreshBothOffPublishesStaticOnly(t *testing.T) {
+	cfgYAML := "docker:\n  containers: false\n  swarm: false\n" + staticYAML
 	a, store := newTestApp(t, cfgYAML, NopCollector{}, io.Discard)
 	if err := a.Refresh(context.Background()); err != nil {
 		t.Fatal(err)

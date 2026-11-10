@@ -16,12 +16,13 @@ type RuleModel struct {
 }
 
 var funcs = template.FuncMap{
-	"normalize":  Normalize,
-	"lower":      strings.ToLower,
-	"upper":      strings.ToUpper,
-	"trimPrefix": func(prefix, s string) string { return strings.TrimPrefix(s, prefix) },
-	"trimSuffix": func(suffix, s string) string { return strings.TrimSuffix(s, suffix) },
-	"replace":    func(old, new, s string) string { return strings.ReplaceAll(s, old, new) },
+	"normalize":   Normalize,
+	"lower":       strings.ToLower,
+	"upper":       strings.ToUpper,
+	"trimPrefix":  func(prefix, s string) string { return strings.TrimPrefix(s, prefix) },
+	"trimSuffix":  func(suffix, s string) string { return strings.TrimSuffix(s, suffix) },
+	"replace":     func(old, new, s string) string { return strings.ReplaceAll(s, old, new) },
+	"trimProject": TrimProject,
 }
 
 // Parse parses the default rule template tpl. It fails on syntax errors and on
@@ -43,6 +44,17 @@ func Execute(t *template.Template, model RuleModel) (string, error) {
 // with a single "-" and trims leading and trailing separators.
 func Normalize(name string) string {
 	return strings.Join(strings.FieldsFunc(name, notLetterOrDigit), "-")
+}
+
+// TrimProject returns the part of name after its last underscore, which strips
+// the compose project or swarm stack prefix from "project_container". Names
+// without a usable underscore are returned unchanged.
+func TrimProject(name string) string {
+	i := strings.LastIndexByte(name, '_')
+	if i < 0 || i == len(name)-1 {
+		return name
+	}
+	return name[i+1:]
 }
 
 func notLetterOrDigit(r rune) bool {

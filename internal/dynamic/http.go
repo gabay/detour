@@ -55,12 +55,6 @@ type ServersLoadBalancer struct {
 	ServersTransport   string              `json:"serversTransport,omitempty" yaml:"serversTransport,omitempty"`
 }
 
-// SetDefaults is called by the label parser when a load balancer is created.
-func (lb *ServersLoadBalancer) SetDefaults() {
-	passHostHeader := true
-	lb.PassHostHeader = &passHostHeader
-}
-
 // Server is a backend server of a load balancer.
 //
 // Scheme and Port are label-only inputs (for example traefik.http.services.x.loadbalancer.server.port).

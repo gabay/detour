@@ -83,9 +83,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		"endpointPath", cfg.Server.EndpointPath,
 		"updateInterval", cfg.Server.UpdateInterval.Std(),
 		"staleDuration", cfg.Server.StaleDuration.Std(),
-		"dockerMode", cfg.Docker.Mode,
-		"containers", cfg.Docker.ContainersEnabled(),
-		"swarm", cfg.Docker.SwarmEnabled(),
+		"containers", cfg.Docker.Containers,
+		"swarm", cfg.Docker.Swarm,
 		"dockerEndpoint", cfg.Docker.Endpoint,
 	)
 
@@ -99,7 +98,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 // newCollector creates the Docker collector only when a label source is enabled.
 // The Docker daemon is not contacted here; the poller handles connection errors.
 func newCollector(cfg *config.Config) (app.Collector, func(), error) {
-	if !cfg.Docker.ContainersEnabled() && !cfg.Docker.SwarmEnabled() {
+	if !cfg.Docker.Containers && !cfg.Docker.Swarm {
 		return app.NopCollector{}, func() {}, nil
 	}
 	cli, err := docker.NewClient(cfg.Docker)

@@ -55,14 +55,14 @@ func (c *Collector) Collect(ctx context.Context) ([]Container, error) {
 		return nil, err
 	}
 	out := []Container{}
-	if c.cfg.ContainersEnabled() {
+	if c.cfg.Containers {
 		ctrs, err := c.collectContainers(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("collect containers: %w", err)
 		}
 		out = append(out, ctrs...)
 	}
-	if c.cfg.SwarmEnabled() {
+	if c.cfg.Swarm {
 		entries, err := c.collectSwarm(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("collect swarm: %w", err)

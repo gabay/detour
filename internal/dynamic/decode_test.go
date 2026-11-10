@@ -35,8 +35,8 @@ func TestDecodeLabels(t *testing.T) {
 				if want := []Server{{Port: "80"}}; !reflect.DeepEqual(lb.Servers, want) {
 					t.Errorf("servers = %+v, want %+v", lb.Servers, want)
 				}
-				if lb.PassHostHeader == nil || !*lb.PassHostHeader {
-					t.Errorf("passHostHeader should default to true")
+				if lb.PassHostHeader != nil {
+					t.Errorf("passHostHeader = %v, want unset so Traefik applies its default", *lb.PassHostHeader)
 				}
 			},
 		},

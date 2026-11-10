@@ -178,7 +178,6 @@ func (b *Builder) buildUDP(c docker.Container, opts Options, u *dynamic.UDPConfi
 func (b *Builder) buildHTTP(c docker.Container, opts Options, h *dynamic.HTTPConfiguration, name string, active bool) error {
 	if len(h.Services) == 0 {
 		lb := &dynamic.ServersLoadBalancer{}
-		lb.SetDefaults()
 		h.Services = map[string]*dynamic.Service{name: {LoadBalancer: lb}}
 	}
 	if active {

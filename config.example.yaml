@@ -17,16 +17,10 @@ server:
   staleDuration: 1m
 
 docker:
-  # Which label sources are collected:
-  #   docker - containers only (default; also used when empty)
-  #   swarm  - Swarm services only
-  #   both   - containers and Swarm services
-  #   off    - neither
-  # The explicit "containers" and "swarm" booleans below override the mode
-  # for that source, even when the combination is contradictory.
-  mode: docker
-  # containers: true
-  # swarm: false
+  # Label sources, independently switchable (defaults shown).
+  # With both false, only the static dynamic section is published.
+  containers: true   # collect labels from Docker containers
+  swarm: false       # collect labels from Swarm services
 
   # Docker API endpoint. Supported schemes: unix, tcp, http, https.
   endpoint: "unix:///var/run/docker.sock"
@@ -46,7 +40,12 @@ docker:
   exposedByDefault: false
   # Network used to reach containers when several are attached.
   network: ""
-  # Router rule generated when a container has no explicit rule.
+  # Router rule template generated when a container has no explicit rule.
+  # Executed with .Name, .ContainerName and .Labels. Available functions:
+  #   normalize, lower, upper, trimPrefix, trimSuffix, replace,
+  #   trimProject (part after the last "_"; "project_container" -> "container").
+  # .Name of compose containers is "<service>_<project>", so trimProject there
+  # yields the project; prefer .ContainerName or .Labels for compose containers.
   defaultRule: "Host(`{{ normalize .Name }}`)"
   # Only containers matching this constraint expression are used, e.g.
   # Label("traefik.constraint", "public") || !LabelRegex("env", "^dev").
