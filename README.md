@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="detour.jpg" alt="Detour Logo" width="250" />
+</div>
+
 # Detour
 
 Detour is a lightweight Go HTTP server that acts as a Traefik HTTP provider. It merges static Traefik dynamic configuration read from YAML files with configuration derived from Docker and Docker Swarm labels, and serves the result to Traefik so routers, services, middlewares and TLS settings can be declared either way.
