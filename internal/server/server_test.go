@@ -323,3 +323,26 @@ func TestNewSnapshotRoundTrip(t *testing.T) {
 		t.Error("YAML and JSON share an ETag")
 	}
 }
+
+func TestSetConfigChangesEndpointLive(t *testing.T) {
+	store := &Store{}
+	sn, err := NewSnapshot(testConf(), time.Unix(0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.Set(sn)
+	clk := &clock{t: time.Unix(0, 0).Add(30 * time.Second)}
+	s := New(store, config.ServerConfig{EndpointPath: "/old", StaleDuration: config.Duration(time.Minute)}, clk.now, nil)
+	h := s.Handler()
+
+	if code := do(t, h, http.MethodGet, "/old", nil).StatusCode; code != http.StatusOK {
+		t.Fatalf("/old before SetConfig: status %d", code)
+	}
+	s.SetConfig(config.ServerConfig{EndpointPath: "/new", StaleDuration: config.Duration(time.Second)})
+	if code := do(t, h, http.MethodGet, "/old", nil).StatusCode; code == http.StatusOK {
+		t.Error("/old still served after endpointPath change")
+	}
+	if code := do(t, h, http.MethodGet, "/new", nil).StatusCode; code != http.StatusServiceUnavailable {
+		t.Errorf("/new with 30s-old snapshot and 1s staleDuration: status %d, want 503", code)
+	}
+}

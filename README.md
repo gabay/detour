@@ -11,7 +11,7 @@ Detour is a lightweight Go HTTP server that acts as a Traefik HTTP provider. It 
 
 ## Configuration
 
-Detour reads one YAML file, passed at startup. The file is read once; there is no hot reload, so restart Detour after changing it. Unknown keys are an error. See [`config.example.yaml`](config.example.yaml) for a fully commented example with every option.
+Detour reads one YAML file, passed at startup, and reloads it when it changes (see [Config reload](#config-reload)). Unknown keys are an error. See [`config.example.yaml`](config.example.yaml) for a fully commented example with every option.
 
 Durations accept Go duration strings (`"10s"`, `"2m"`) or a plain integer number of seconds (`10`).
 
@@ -131,6 +131,16 @@ The body explains which case applies. Traefik's HTTP provider treats any non-200
 
 **Health.** `GET /healthz` returns `200 ok` when a fresh configuration exists, otherwise `503` with the same reason text. Use it for container health checks. `/healthz` cannot be used as `endpointPath`.
 
+## Config reload
+
+The configuration file is watched with inotify (via `fsnotify`) on its parent directory, so editors that save by rename, `sed -i`, and Kubernetes ConfigMap or Docker bind mounts are all detected. Events are debounced by 250ms, so a burst of writes causes one reload. Each reload is logged as `configuration reloaded` with the sections that changed.
+
+- **Applied live:** `docker` (the Docker client, collector and builder are rebuilt), `dynamic`, `server.updateInterval`, `server.staleDuration` and `server.endpointPath`. The new configuration is published by an immediate refresh.
+- **Requires a restart:** `server.listenAddr`. A change is logged as a warning and the old address keeps being served.
+- **Failure:** if the file cannot be read, parsed or validated, or the Docker components cannot be built, an error is logged and the previous configuration keeps running.
+- **SIGHUP:** sending `SIGHUP` forces a reload of the file (for example when inotify events are not delivered).
+- **Bind mounts:** mount the directory containing the file, or a file whose directory is replaced atomically. A single-file bind mount that is replaced by rename may not produce events; use `SIGHUP` in that case.
+
 ## Command-line flags
 
 | Flag | Default | Description |
@@ -188,6 +198,7 @@ Equivalent flags: `--providers.http.endpoint=http://detour:7890/ --providers.htt
 | Compiler/merger              | done    |
 | HTTP server                  | done    |
 | Poller and entrypoint        | done    |
+| Live config reload (inotify, SIGHUP) | done |
 | Dockerfile, Makefile, compose example | done |
 
 ## How containers become routes

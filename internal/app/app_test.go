@@ -71,13 +71,23 @@ func newTestApp(t *testing.T, cfgYAML string, coll Collector, logOut io.Writer) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := builder.New(cfg.Docker)
+	store := &server.Store{}
+	logger := slog.New(slog.NewTextHandler(logOut, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	a, err := New("", cfg, fixedFactory(coll), store, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &server.Store{}
-	logger := slog.New(slog.NewTextHandler(logOut, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	return New(cfg, coll, b, compiler.New(cfg.Dynamic), store, logger), store
+	return a, store
+}
+
+func fixedFactory(coll Collector) Factory {
+	return func(cfg *config.Config) (Components, error) {
+		b, err := builder.New(cfg.Docker)
+		if err != nil {
+			return Components{}, err
+		}
+		return Components{Collector: coll, Builder: b, Compiler: compiler.New(cfg.Dynamic)}, nil
+	}
 }
 
 func decodeServed(t *testing.T, sn *server.Snapshot) *dynamic.Configuration {

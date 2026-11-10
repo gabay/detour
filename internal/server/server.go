@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"detour/internal/compiler"
@@ -24,7 +25,7 @@ const (
 // health check at /healthz.
 type Server struct {
 	store  *Store
-	cfg    config.ServerConfig
+	cfg    atomic.Pointer[config.ServerConfig]
 	now    func() time.Time
 	logger *slog.Logger
 }
@@ -37,7 +38,14 @@ func New(store *Store, cfg config.ServerConfig, now func() time.Time, logger *sl
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{store: store, cfg: cfg, now: now, logger: logger}
+	s := &Server{store: store, now: now, logger: logger}
+	s.SetConfig(cfg)
+	return s
+}
+
+// SetConfig replaces the endpoint and staleness settings; it is safe to call while serving.
+func (s *Server) SetConfig(cfg config.ServerConfig) {
+	s.cfg.Store(&cfg)
 }
 
 // Handler returns the HTTP handler for the endpoint and health check.
@@ -61,7 +69,7 @@ func NewHTTPServer(addr string, handler http.Handler) *http.Server {
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	s.logger.Debug("http request", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 	switch r.URL.Path {
-	case s.cfg.EndpointPath:
+	case s.cfg.Load().EndpointPath:
 		s.serveConfig(w, r)
 	case healthPath:
 		s.serveHealth(w, r)
@@ -133,7 +141,7 @@ func (s *Server) unavailableReason(sn *Snapshot) string {
 		return msgNotYet
 	}
 	age := s.now().Sub(sn.UpdatedAt)
-	stale := s.cfg.StaleDuration.Std()
+	stale := s.cfg.Load().StaleDuration.Std()
 	if age > stale {
 		return fmt.Sprintf("no recent configuration available: last successful update %s ago (stale after %s)",
 			age.Round(time.Millisecond), stale)
@@ -144,7 +152,7 @@ func (s *Server) unavailableReason(sn *Snapshot) string {
 // unavailable answers 503 with Retry-After set to the polling interval. Traefik
 // treats any non-200 as a failed poll and keeps its previous configuration.
 func (s *Server) unavailable(w http.ResponseWriter, reason string) {
-	secs := int(math.Ceil(s.cfg.UpdateInterval.Std().Seconds()))
+	secs := int(math.Ceil(s.cfg.Load().UpdateInterval.Std().Seconds()))
 	w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
 	w.Header().Set("Cache-Control", "no-store")
 	http.Error(w, reason, http.StatusServiceUnavailable)

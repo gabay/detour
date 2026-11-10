@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"detour/internal/app"
 	"detour/internal/builder"
@@ -20,9 +21,13 @@ import (
 	"detour/internal/config"
 	"detour/internal/docker"
 	"detour/internal/server"
+	"detour/internal/watch"
 )
 
-const defaultConfigPath = "config.yaml"
+const (
+	defaultConfigPath = "config.yaml"
+	reloadDebounce    = 250 * time.Millisecond
+)
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -63,18 +68,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	collector, closeCollector, err := newCollector(cfg)
+	store := &server.Store{}
+	a, err := app.New(*configPath, cfg, buildComponents, store, logger)
 	if err != nil {
 		return err
 	}
-	defer closeCollector()
-
-	b, err := builder.New(cfg.Docker)
-	if err != nil {
-		return fmt.Errorf("builder: %w", err)
-	}
-	store := &server.Store{}
-	a := app.New(cfg, collector, b, compiler.New(cfg.Dynamic), store, logger)
 
 	logger.Info("starting detour",
 		"version", docker.Version,
@@ -88,6 +86,26 @@ func run(args []string, stdout, stderr io.Writer) error {
 		"dockerEndpoint", cfg.Docker.Endpoint,
 	)
 
+	go func() {
+		if err := watch.Watch(ctx, *configPath, reloadDebounce, a.RequestReload); err != nil {
+			logger.Error("config watch disabled; reload with SIGHUP", "path", *configPath, "err", err)
+		}
+	}()
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	defer signal.Stop(hup)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-hup:
+				logger.Info("reload requested by SIGHUP")
+				a.RequestReload()
+			}
+		}
+	}()
+
 	if err := a.Run(ctx); err != nil {
 		return err
 	}
@@ -95,18 +113,33 @@ func run(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+// buildComponents creates the collector, builder and compiler for cfg. The Docker
+// daemon is not contacted here; the poller handles connection errors.
+func buildComponents(cfg *config.Config) (app.Components, error) {
+	coll, err := newCollector(cfg)
+	if err != nil {
+		return app.Components{}, err
+	}
+	b, err := builder.New(cfg.Docker)
+	if err != nil {
+		if closer, ok := coll.(io.Closer); ok {
+			_ = closer.Close()
+		}
+		return app.Components{}, fmt.Errorf("builder: %w", err)
+	}
+	return app.Components{Collector: coll, Builder: b, Compiler: compiler.New(cfg.Dynamic)}, nil
+}
+
 // newCollector creates the Docker collector only when a label source is enabled.
-// The Docker daemon is not contacted here; the poller handles connection errors.
-func newCollector(cfg *config.Config) (app.Collector, func(), error) {
+func newCollector(cfg *config.Config) (app.Collector, error) {
 	if !cfg.Docker.Containers && !cfg.Docker.Swarm {
-		return app.NopCollector{}, func() {}, nil
+		return app.NopCollector{}, nil
 	}
 	cli, err := docker.NewClient(cfg.Docker)
 	if err != nil {
-		return nil, nil, fmt.Errorf("docker client: %w", err)
+		return nil, fmt.Errorf("docker client: %w", err)
 	}
-	c := docker.NewCollector(cli, cfg.Docker)
-	return c, func() { _ = c.Close() }, nil
+	return docker.NewCollector(cli, cfg.Docker), nil
 }
 
 func newLogger(w io.Writer, level, format string) (*slog.Logger, error) {

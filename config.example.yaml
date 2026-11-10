@@ -2,7 +2,8 @@
 #
 # Every option is shown with its default value. Durations accept Go duration
 # strings ("10s", "2m", "500ms") or a plain integer number of seconds (10).
-# The file is read once at startup; restart Detour to apply changes.
+# The file is watched and reloaded on change (or on SIGHUP). Everything except
+# server.listenAddr applies live; a listenAddr change needs a restart.
 
 server:
   # Address the HTTP provider endpoint listens on.
