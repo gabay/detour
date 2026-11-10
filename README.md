@@ -71,6 +71,27 @@ Optional. Static Traefik dynamic configuration (`http`, `tcp`, `udp`, `tls` sect
 |------------------------------|---------|
 | `internal/dynamic`           | done    |
 | Config loader                | done    |
-| Docker/Swarm collector       | planned |
+| Docker/Swarm collector       | done    |
 | Compiler/merger              | planned |
 | HTTP server                  | planned |
+
+## Docker access
+
+Detour reads the Docker Engine API with read-only `GET` requests only. Point `docker.endpoint` at either:
+
+- a local socket: `unix:///var/run/docker.sock` (mount it read-only into the Detour container), or
+- a socket proxy: `tcp://socket-proxy:2375` (plain HTTP; with a `docker.tls` block it becomes HTTPS).
+
+Environment variables such as `DOCKER_HOST` are ignored; the config file is the only source.
+
+When using a socket proxy such as `tecnativa/docker-socket-proxy`, enable these permissions:
+
+| Proxy variable | Needed for |
+|----------------|------------|
+| `CONTAINERS=1` | container list and inspect (and connected containers for `network_mode: container:`) |
+| `SERVICES=1`   | Swarm service list |
+| `TASKS=1`      | Swarm task list |
+| `NETWORKS=1`   | network list (Swarm networks) |
+| `NODES=1`      | node lookup for task node IPs |
+
+`/_ping` and `/version` are required and are enabled by default in that proxy. Set `INFO=1` only if you need it; Detour does not call `/info`.
