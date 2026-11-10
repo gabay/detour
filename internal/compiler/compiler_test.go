@@ -70,7 +70,7 @@ func TestCompile(t *testing.T) {
 			name:       "all same-name conflicts sorted by kind and name",
 			static:     `{"http":{"services":{"s":{}},"middlewares":{"m":{}},"serversTransports":{"t":{}}},"tcp":{"routers":{"r":{}},"services":{"s":{}},"middlewares":{"m":{}},"serversTransports":{"t":{}}},"udp":{"services":{"s":{}}},"tls":{"options":{"o":{}},"stores":{"st":{}}}}`,
 			discovered: `{"http":{"services":{"s":{"loadBalancer":{"serversTransport":"x"}}},"middlewares":{"m":{}},"serversTransports":{"t":{}}},"tcp":{"routers":{"r":{}},"services":{"s":{}},"middlewares":{"m":{}},"serversTransports":{"t":{}}},"udp":{"services":{"s":{}}},"tls":{"options":{"o":{}},"stores":{"st":{}}}}`,
-			want:       `{"http":{"services":{"s":{}},"middlewares":{"m":{}},"serversTransports":{"t":{}}},"tcp":{"routers":{"r":{}},"services":{"s":{}},"middlewares":{"m":{}},"serversTransports":{"t":{}}},"udp":{"services":{"s":{}}},"tls":{"options":{"o":{"clientAuth":{}}},"stores":{"st":{}}}}`,
+			want:       `{"http":{"services":{"s":{}},"middlewares":{"m":{}},"serversTransports":{"t":{}}},"tcp":{"routers":{"r":{}},"services":{"s":{}},"middlewares":{"m":{}},"serversTransports":{"t":{}}},"udp":{"services":{"s":{}}},"tls":{"options":{"o":{}},"stores":{"st":{}}}}`,
 			conflicts: []Conflict{
 				{"http middleware", "m"},
 				{"http serversTransport", "t"},

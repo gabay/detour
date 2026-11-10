@@ -1,0 +1,8 @@
+.git
+.gitignore
+*.test
+coverage.out
+detour
+README.md
+docker-compose*.yaml
+config.yaml

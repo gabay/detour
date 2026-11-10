@@ -166,3 +166,22 @@ func TestDecodeLabelsErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeLabelsTLSClientAuth(t *testing.T) {
+	c := &Configuration{TLS: &TLSConfiguration{}}
+	err := Decode(map[string]string{
+		"traefik.tls.options.strict.clientAuth.clientAuthType": "RequireAndVerifyClientCert",
+		"traefik.tls.options.strict.clientAuth.caFiles":        "/ca.pem",
+		"traefik.tls.options.plain.minVersion":                 "VersionTLS12",
+	}, c, "traefik.tls.options")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca := c.TLS.Options["strict"].ClientAuth
+	if ca == nil || ca.ClientAuthType != "RequireAndVerifyClientCert" || !reflect.DeepEqual(ca.CAFiles, []string{"/ca.pem"}) {
+		t.Errorf("clientAuth = %+v", ca)
+	}
+	if got := c.TLS.Options["plain"].ClientAuth; got != nil {
+		t.Errorf("plain clientAuth = %+v, want nil", got)
+	}
+}

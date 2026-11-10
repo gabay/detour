@@ -1,0 +1,50 @@
+# Example: Traefik v3 polling Detour, which reads Docker labels.
+#
+# Two variants are shown. Use "detour" with the socket mounted directly, or use
+# "detour-proxied", which talks to the Docker API through a read-only socket proxy.
+# Enable only one of them, and point docker.endpoint in detour's config at the
+# proxy (tcp://dockerproxy:2375) when using the proxied variant.
+services:
+  traefik:
+    image: traefik:v3.5
+    command:
+      - --providers.http.endpoint=http://detour:7890/
+      - --providers.http.pollInterval=5s
+      - --entrypoints.web.address=:80
+    ports:
+      - "80:80"
+    depends_on:
+      - detour
+
+  detour:
+    image: detour:dev
+    volumes:
+      - ./detour.yaml:/etc/detour/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    expose:
+      - "7890"
+    restart: unless-stopped
+
+  # Variant: socket proxy instead of mounting the Docker socket into Detour.
+  dockerproxy:
+    image: tecnativa/docker-socket-proxy
+    environment:
+      CONTAINERS: 1
+      SERVICES: 1
+      TASKS: 1
+      NETWORKS: 1
+      NODES: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    expose:
+      - "2375"
+
+  detour-proxied:
+    image: detour:dev
+    profiles: ["proxied"]
+    volumes:
+      - ./detour-proxied.yaml:/etc/detour/config.yaml:ro
+    expose:
+      - "7890"
+    depends_on:
+      - dockerproxy

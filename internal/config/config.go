@@ -129,6 +129,9 @@ func (c *Config) Validate() error {
 	if !strings.HasPrefix(s.EndpointPath, "/") {
 		errs = append(errs, fmt.Errorf("server.endpointPath: %q must start with \"/\"", s.EndpointPath))
 	}
+	if s.EndpointPath == "/healthz" {
+		errs = append(errs, errors.New("server.endpointPath: \"/healthz\" is reserved for the health check"))
+	}
 	if s.UpdateInterval <= 0 {
 		errs = append(errs, fmt.Errorf("server.updateInterval: must be greater than 0, got %s", s.UpdateInterval.Std()))
 	}

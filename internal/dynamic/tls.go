@@ -22,13 +22,13 @@ type CertAndStores struct {
 
 // TLSOptions are named TLS options that routers can reference.
 type TLSOptions struct {
-	MinVersion       string     `json:"minVersion,omitempty" yaml:"minVersion,omitempty"`
-	MaxVersion       string     `json:"maxVersion,omitempty" yaml:"maxVersion,omitempty"`
-	CipherSuites     []string   `json:"cipherSuites,omitempty" yaml:"cipherSuites,omitempty"`
-	CurvePreferences []string   `json:"curvePreferences,omitempty" yaml:"curvePreferences,omitempty"`
-	SniStrict        bool       `json:"sniStrict,omitempty" yaml:"sniStrict,omitempty"`
-	ALPNProtocols    []string   `json:"alpnProtocols,omitempty" yaml:"alpnProtocols,omitempty"`
-	ClientAuth       ClientAuth `json:"clientAuth,omitempty" yaml:"clientAuth,omitempty"`
+	MinVersion       string      `json:"minVersion,omitempty" yaml:"minVersion,omitempty"`
+	MaxVersion       string      `json:"maxVersion,omitempty" yaml:"maxVersion,omitempty"`
+	CipherSuites     []string    `json:"cipherSuites,omitempty" yaml:"cipherSuites,omitempty"`
+	CurvePreferences []string    `json:"curvePreferences,omitempty" yaml:"curvePreferences,omitempty"`
+	SniStrict        bool        `json:"sniStrict,omitempty" yaml:"sniStrict,omitempty"`
+	ALPNProtocols    []string    `json:"alpnProtocols,omitempty" yaml:"alpnProtocols,omitempty"`
+	ClientAuth       *ClientAuth `json:"clientAuth,omitempty" yaml:"clientAuth,omitempty" label:"allowEmpty"`
 }
 
 // ClientAuth configures client certificate verification.

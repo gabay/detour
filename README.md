@@ -86,6 +86,90 @@ docker:
   constraints: 'Label("traefik.constraint", "public") || !LabelRegex("env", "^dev")'
 ```
 
+## Quick start
+
+```sh
+make build                       # produces ./detour
+cp config.example.yaml config.yaml
+./detour -config config.yaml     # serves on :7890 by default
+curl -s http://localhost:7890/   # merged configuration as YAML
+```
+
+Detour starts serving immediately. Until the first successful poll it answers `503`, which Traefik treats as "no change".
+
+## HTTP endpoint
+
+Served at `server.endpointPath` (default `/`):
+
+| Request | Result |
+|---------|--------|
+| `GET /` | YAML, `Content-Type: application/yaml; charset=utf-8` |
+| `GET /?format=json` | JSON, `application/json; charset=utf-8` |
+| `GET /?format=yaml` | YAML explicitly |
+| `GET /` with `Accept: application/json` | JSON (ignored when `format` is set) |
+| `GET /?format=xml` | `400 Bad Request` |
+| `HEAD` | same headers, no body |
+| other methods | `405 Method Not Allowed` with `Allow: GET, HEAD` |
+| other paths | `404 Not Found` |
+
+**Compression.** When `Accept-Encoding` allows gzip (an explicit `gzip` or `*` with q > 0, and not `gzip;q=0`), the pre-compressed body is sent with `Content-Encoding: gzip`. `Vary: Accept-Encoding` is always set. Gzip bytes are created once per poll, never per request.
+
+**Caching.** Responses carry a strong `ETag` derived from the uncompressed content (gzip variants have their own ETag). `If-None-Match` returns `304 Not Modified`. `Cache-Control: no-store` is set.
+
+**Staleness and 503.** Detour answers `503 Service Unavailable` with `Retry-After` (the update interval in seconds) when:
+
+- no configuration has been built yet, or
+- the last successful build is older than `server.staleDuration`.
+
+The body explains which case applies. Traefik's HTTP provider treats any non-200 response as an error and keeps its previous configuration, so a Docker outage degrades to "no change" for `staleDuration`, after which Traefik keeps its last configuration until Detour recovers. Failed polls keep the previous snapshot in place; they never publish an empty one.
+
+**Health.** `GET /healthz` returns `200 ok` when a fresh configuration exists, otherwise `503` with the same reason text. Use it for container health checks. `/healthz` cannot be used as `endpointPath`.
+
+## Command-line flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-config` | `config.yaml` (or `$DETOUR_CONFIG`) | Configuration file path. |
+| `-log-level` | `info` | `debug`, `info`, `warn` or `error`. Request logs are at `debug`. |
+| `-log-format` | `text` | `text` or `json`. |
+| `-version` | | Print the version and exit. |
+
+Detour exits with status 1 on configuration or startup errors. `SIGINT` and `SIGTERM` trigger a graceful shutdown (5 second limit).
+
+## Building
+
+```sh
+make build        # CGO_ENABLED=0 binary with the version from git describe
+make test         # go test -race ./...
+make docker       # image tagged detour:<version>
+```
+
+The version is injected with `-ldflags "-X detour/internal/docker.Version=<version>"`; the same flag is used by the Dockerfile through the `VERSION` build argument.
+
+## Docker
+
+```sh
+docker build --build-arg VERSION=0.1.0 -t detour:0.1.0 .
+docker run --rm -p 7890:7890 \
+  -v "$PWD/config.yaml:/etc/detour/config.yaml:ro" \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  detour:0.1.0
+```
+
+The image is `gcr.io/distroless/static:nonroot` and only contains the binary. Mount the config at `/etc/detour/config.yaml`. The Docker socket must be readable by the non-root user, or use a socket proxy (see `docker-compose.example.yaml`, which runs Traefik, Detour and a `tecnativa/docker-socket-proxy` variant).
+
+## Traefik provider
+
+```yaml
+# Traefik v3 static configuration
+providers:
+  http:
+    endpoint: "http://detour:7890/"
+    pollInterval: 5s
+```
+
+Equivalent flags: `--providers.http.endpoint=http://detour:7890/ --providers.http.pollInterval=5s`. Keep Traefik's `pollInterval` at or below Detour's `updateInterval` so Traefik picks up changes promptly.
+
 ## Status
 
 | Component                    | Status  |
@@ -96,7 +180,9 @@ docker:
 | Label helpers                | done    |
 | Dynamic configuration builder | done   |
 | Compiler/merger              | done    |
-| HTTP server                  | planned |
+| HTTP server                  | done    |
+| Poller and entrypoint        | done    |
+| Dockerfile, Makefile, compose example | done |
 
 ## How containers become routes
 
