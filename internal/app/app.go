@@ -66,6 +66,7 @@ type App struct {
 	logger     *slog.Logger
 	now        func() time.Time
 	reloadCh   chan struct{}
+	refreshCh  chan struct{}
 
 	// mu serialises Refresh and Reload and guards the fields below.
 	mu         sync.Mutex
@@ -90,18 +91,22 @@ func New(configPath string, cfg *config.Config, factory Factory, store *server.S
 		return nil, fmt.Errorf("build components: %w", err)
 	}
 	now := time.Now
-	return &App{
+	srv := server.New(store, cfg.Server, now, logger)
+	a := &App{
 		configPath: configPath,
 		factory:    factory,
 		store:      store,
-		srv:        server.New(store, cfg.Server, now, logger),
+		srv:        srv,
 		logger:     logger,
 		now:        now,
 		reloadCh:   make(chan struct{}, 1),
+		refreshCh:  make(chan struct{}, 1),
 		cfg:        cfg,
 		comp:       comp,
 		listenAddr: cfg.Server.ListenAddr,
-	}, nil
+	}
+	srv.SetRefreshHandler(a.RequestRefresh)
+	return a, nil
 }
 
 // Refresh collects, builds, compiles and publishes one configuration snapshot.
@@ -284,6 +289,15 @@ func closeProviders(providers []Provider, logger *slog.Logger) {
 	}
 }
 
+// RequestRefresh asks the poll loop to poll containers immediately, subject to
+// a 1-second rate limit. Pending requests are coalesced.
+func (a *App) RequestRefresh() {
+	select {
+	case a.refreshCh <- struct{}{}:
+	default:
+	}
+}
+
 // RequestReload asks the poll loop to reload the configuration file. It never blocks;
 // requests that arrive while one is pending are coalesced.
 func (a *App) RequestReload() {
@@ -353,11 +367,14 @@ func (a *App) Serve(ctx context.Context, ln net.Listener) error {
 	return runErr
 }
 
+const minManualRefreshInterval = time.Second
+
 // poll refreshes once immediately, then at every UpdateInterval and whenever a
-// reload is requested. Refreshes and reloads run sequentially in this goroutine,
-// so ticks that fire during a slow refresh are dropped.
+// reload or manual refresh is requested. Refreshes and reloads run sequentially
+// in this goroutine, so ticks that fire during a slow refresh are dropped.
 func (a *App) poll(ctx context.Context) {
 	a.refreshWithTimeout(ctx)
+	lastPoll := a.now()
 
 	interval := a.updateInterval()
 	ticker := time.NewTicker(interval)
@@ -368,8 +385,16 @@ func (a *App) poll(ctx context.Context) {
 			return
 		case <-ticker.C:
 			a.refreshWithTimeout(ctx)
+			lastPoll = a.now()
+		case <-a.refreshCh:
+			if a.now().Sub(lastPoll) < minManualRefreshInterval {
+				continue
+			}
+			a.refreshWithTimeout(ctx)
+			lastPoll = a.now()
 		case <-a.reloadCh:
 			a.reloadFile(ctx)
+			lastPoll = a.now()
 			if d := a.updateInterval(); d != interval {
 				interval = d
 				ticker.Reset(d)

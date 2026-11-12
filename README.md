@@ -161,6 +161,8 @@ The body explains which case applies. Traefik's HTTP provider treats any non-200
 
 **Health.** `GET /healthz` returns `200 ok` when a fresh configuration exists, otherwise `503` with the same reason text. Use it for container health checks. `/healthz` cannot be used as `endpointPath`.
 
+**On-demand refresh.** `POST /refresh` triggers an immediate poll of all configured Docker providers, rate-limited to at most once per second (requests within 1 second of the previous poll are ignored). Returns `202 Accepted`. `/refresh` cannot be used as `endpointPath`.
+
 ## Config reload
 
 The configuration file is watched with inotify (via `fsnotify`) on its parent directory, so editors that save by rename, `sed -i`, and Kubernetes ConfigMap or Docker bind mounts are all detected. Events are debounced by 250ms, so a burst of writes causes one reload. Each reload is logged as `configuration reloaded` with the sections that changed.

@@ -346,3 +346,26 @@ func TestSetConfigChangesEndpointLive(t *testing.T) {
 		t.Errorf("/new with 30s-old snapshot and 1s staleDuration: status %d, want 503", code)
 	}
 }
+
+func TestRefreshEndpoint(t *testing.T) {
+	s := New(&Store{}, config.ServerConfig{EndpointPath: "/", UpdateInterval: config.Duration(time.Second), StaleDuration: config.Duration(time.Minute)}, nil, nil)
+	var called int
+	s.SetRefreshHandler(func() { called++ })
+	h := s.Handler()
+
+	res := do(t, h, http.MethodGet, "/refresh", nil)
+	if res.StatusCode != http.StatusMethodNotAllowed || res.Header.Get("Allow") != http.MethodPost {
+		t.Errorf("GET /refresh: status=%d Allow=%q", res.StatusCode, res.Header.Get("Allow"))
+	}
+	if called != 0 {
+		t.Errorf("GET /refresh called handler %d times", called)
+	}
+
+	res = do(t, h, http.MethodPost, "/refresh", nil)
+	if res.StatusCode != http.StatusAccepted {
+		t.Errorf("POST /refresh: status=%d, want 202", res.StatusCode)
+	}
+	if called != 1 {
+		t.Errorf("POST /refresh called handler %d times, want 1", called)
+	}
+}

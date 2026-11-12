@@ -206,6 +206,7 @@ func TestValidationErrors(t *testing.T) {
 		{"password without user", "docker:\n  p:\n    password: secret\n", "docker.p.username"},
 		{"bad endpointPath", "server:\n  endpointPath: traefik\n", "server.endpointPath"},
 		{"endpointPath reserved for healthz", "server:\n  endpointPath: /healthz\n", "server.endpointPath"},
+		{"endpointPath reserved for refresh", "server:\n  endpointPath: /refresh\n", "server.endpointPath"},
 		{"unknown provider field", "docker:\n  p:\n    mode: both\n", "mode"},
 		{"legacy flat docker config rejected", "docker:\n  endpoint: tcp://h:2375\n", "docker provider configuration must be a mapping"},
 		{"docker list rejected", "docker:\n  - endpoint: tcp://h:2375\n", "docker must be a map of named providers"},

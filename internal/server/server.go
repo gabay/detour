@@ -16,18 +16,20 @@ import (
 
 const (
 	healthPath      = "/healthz"
+	refreshPath     = "/refresh"
 	contentTypeYAML = "application/yaml; charset=utf-8"
 	contentTypeJSON = "application/json; charset=utf-8"
 	msgNotYet       = "configuration not yet available"
 )
 
-// Server serves the current Snapshot at the configured endpoint path and a
-// health check at /healthz.
+// Server serves the current Snapshot at the configured endpoint path, a
+// health check at /healthz, and an on-demand poll trigger at /refresh.
 type Server struct {
-	store  *Store
-	cfg    atomic.Pointer[config.ServerConfig]
-	now    func() time.Time
-	logger *slog.Logger
+	store     *Store
+	cfg       atomic.Pointer[config.ServerConfig]
+	now       func() time.Time
+	logger    *slog.Logger
+	onRefresh func()
 }
 
 // New creates a Server. A nil now uses time.Now and a nil logger uses slog.Default.
@@ -41,6 +43,11 @@ func New(store *Store, cfg config.ServerConfig, now func() time.Time, logger *sl
 	s := &Server{store: store, now: now, logger: logger}
 	s.SetConfig(cfg)
 	return s
+}
+
+// SetRefreshHandler sets the callback invoked by POST /refresh.
+func (s *Server) SetRefreshHandler(fn func()) {
+	s.onRefresh = fn
 }
 
 // SetConfig replaces the endpoint and staleness settings; it is safe to call while serving.
@@ -73,6 +80,8 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		s.serveConfig(w, r)
 	case healthPath:
 		s.serveHealth(w, r)
+	case refreshPath:
+		s.serveRefresh(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -132,6 +141,19 @@ func (s *Server) serveHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodHead {
 		_, _ = w.Write([]byte("ok\n"))
 	}
+}
+
+func (s *Server) serveRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		return
+	}
+	if s.onRefresh != nil {
+		s.onRefresh()
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusAccepted)
 }
 
 // unavailableReason returns why no configuration can be served, or "" when

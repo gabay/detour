@@ -198,6 +198,9 @@ func (c *Config) Validate() error {
 	if s.EndpointPath == "/healthz" {
 		errs = append(errs, errors.New("server.endpointPath: \"/healthz\" is reserved for the health check"))
 	}
+	if s.EndpointPath == "/refresh" {
+		errs = append(errs, errors.New("server.endpointPath: \"/refresh\" is reserved for the refresh endpoint"))
+	}
 	if s.UpdateInterval <= 0 {
 		errs = append(errs, fmt.Errorf("server.updateInterval: must be greater than 0, got %s", s.UpdateInterval.Std()))
 	}

@@ -233,6 +233,87 @@ docker:
 	}
 }
 
+type countingCollector struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (c *countingCollector) Collect(context.Context) ([]docker.Container, error) {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+	return []docker.Container{webContainer()}, nil
+}
+
+func (c *countingCollector) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
+func TestManualRefreshRateLimited(t *testing.T) {
+	coll := &countingCollector{}
+	cfgYAML := strings.Replace(staticYAML, "updateInterval: 50ms", "updateInterval: 1h", 1)
+	a, _ := newTestApp(t, cfgYAML, coll, io.Discard)
+
+	var mu sync.Mutex
+	now := time.Now()
+	a.now = func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return now
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- a.Serve(ctx, ln) }()
+
+	base := "http://" + ln.Addr().String()
+	waitStatus(t, base+"/healthz", http.StatusOK)
+	if got := coll.count(); got != 1 {
+		t.Fatalf("initial poll count = %d, want 1", got)
+	}
+
+	// Within 1 second of the initial poll: POST /refresh is accepted but must not poll.
+	resp, err := http.Post(base+"/refresh", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("POST /refresh status = %d, want 202", resp.StatusCode)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := coll.count(); got != 1 {
+		t.Fatalf("poll count within 1s = %d, want 1 (rate-limited)", got)
+	}
+
+	// Advance clock past 1 second: POST /refresh triggers a poll.
+	mu.Lock()
+	now = now.Add(2 * time.Second)
+	mu.Unlock()
+	resp, err = http.Post(base+"/refresh", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for coll.count() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for manual refresh poll; count = %d", coll.count())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	<-done
+}
+
 func TestRefreshErrorAndRecovery(t *testing.T) {
 	coll := &fakeCollector{containers: []docker.Container{webContainer()}}
 	var logs bytes.Buffer
