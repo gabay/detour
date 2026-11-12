@@ -1,7 +1,7 @@
 # Detour configuration example.
 #
-# Every option is shown with its default value. Durations accept Go duration
-# strings ("10s", "2m", "500ms") or a plain integer number of seconds (10).
+# Every option is shown with its default value unless noted. Durations accept Go
+# duration strings ("10s", "2m", "500ms") or a plain integer number of seconds (10).
 # The file is watched and reloaded on change (or on SIGHUP). Everything except
 # server.listenAddr applies live; a listenAddr change needs a restart.
 
@@ -11,50 +11,71 @@ server:
   # Path Traefik polls for the merged dynamic configuration. Must start with "/".
   endpointPath: "/"
   # How often Docker containers and Swarm services are polled for labels.
-  # Applies to both sources. Must be greater than 0.
+  # Applies to all configured providers. Must be greater than 0.
   updateInterval: 10s
   # Discovered entries not refreshed within this window are dropped.
   # Must be greater than 0.
   staleDuration: 1m
 
+# Named Docker / Swarm providers. Omit or leave empty to publish only the static
+# dynamic section. Any number of providers may be configured; their discovered
+# routes and services are merged.
 docker:
-  # Label sources, independently switchable (defaults shown).
-  # With both false, only the static dynamic section is published.
-  containers: true   # collect labels from Docker containers
-  swarm: false       # collect labels from Swarm services
+  local:
+    # Label sources, independently switchable (defaults shown).
+    # With both false, this provider contacts no Docker API.
+    containers: true   # collect labels from Docker containers
+    swarm: false       # collect labels from Swarm services
 
-  # Docker API endpoint. Supported schemes: unix, tcp, http, https.
-  endpoint: "unix:///var/run/docker.sock"
-  # Timeout for each Docker API request. Must be greater than 0.
-  timeout: 5s
-  # Basic auth for socket proxies. Set both or neither.
-  # username: ""
-  # password: ""
-  # TLS settings for the Docker API endpoint (file paths).
-  # tls:
-  #   ca: /etc/detour/certs/ca.pem
-  #   cert: /etc/detour/certs/client.pem   # set together with key
-  #   key: /etc/detour/certs/client-key.pem
-  #   insecureSkipVerify: false
+    # Docker API endpoint. Supported schemes: unix, tcp, http, https.
+    endpoint: "unix:///var/run/docker.sock"
+    # Resolve the endpoint hostname via DNS on every poll and query every
+    # returned A/AAAA record (for example Swarm's "tcp://tasks.socketproxy:2375").
+    # Not supported with unix:// endpoints.
+    discover: false
+    # Timeout for each Docker API request. Must be greater than 0.
+    timeout: 5s
+    # Basic auth for socket proxies. Set both or neither.
+    # username: ""
+    # password: ""
+    # TLS settings for the Docker API endpoint (file paths).
+    # tls:
+    #   ca: /etc/detour/certs/ca.pem
+    #   cert: /etc/detour/certs/client.pem   # set together with key
+    #   key: /etc/detour/certs/client-key.pem
+    #   insecureSkipVerify: false
 
-  # Expose containers without traefik.enable=true (default false).
-  exposedByDefault: false
-  # Network used to reach containers when several are attached.
-  network: ""
-  # Router rule template generated when a container has no explicit rule.
-  # Executed with .Name, .ContainerName and .Labels. Available functions:
-  #   normalize, lower, upper, trimPrefix, trimSuffix, replace,
-  #   trimProject (part after the last "_"; "project_container" -> "container").
-  # .Name of compose containers is "<service>_<project>", so trimProject there
-  # yields the project; prefer .ContainerName or .Labels for compose containers.
-  defaultRule: "Host(`{{ normalize .Name }}`)"
-  # Only containers matching this constraint expression are used, e.g.
-  # Label("traefik.constraint", "public") || !LabelRegex("env", "^dev").
-  constraints: ""
-  # Use the IP from the published port binding instead of the container IP.
-  useBindPortIP: false
-  # Keep services that have no endpoints instead of dropping them.
-  allowEmptyServices: false
+    # Expose containers without traefik.enable=true (default false).
+    exposedByDefault: false
+    # Network used to reach containers when several are attached.
+    network: ""
+    # Router rule template generated when a container has no explicit rule.
+    # Executed with .Name, .ContainerName and .Labels. Available functions:
+    #   normalize, lower, upper, trimPrefix, trimSuffix, replace,
+    #   trimProject (part after the last "_"; "project_container" -> "container").
+    defaultRule: "Host(`{{ normalize .Name }}`)"
+    # Only containers matching this constraint expression are used, e.g.
+    # Label("traefik.constraint", "public") || !LabelRegex("env", "^dev").
+    constraints: ""
+    # Use the IP from the published port binding instead of the container IP.
+    useBindPortIP: false
+    # Keep services that have no endpoints instead of dropping them.
+    allowEmptyServices: false
+
+  # Example: Swarm services via manager socket proxy + node-local containers
+  # across all Swarm nodes via DNS task discovery.
+  # swarm-manager:
+  #   containers: false
+  #   swarm: true
+  #   endpoint: "tcp://socketproxy-manager:2375"
+  #   network: "traefik-public"
+  #
+  # swarm-nodes:
+  #   containers: true
+  #   swarm: false
+  #   endpoint: "tcp://tasks.socketproxy:2375"
+  #   discover: true
+  #   network: "traefik-public"
 
 # Static dynamic configuration, in Traefik's dynamic-configuration format.
 # Entries here win over Docker/Swarm entries with the same name

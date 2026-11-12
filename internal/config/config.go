@@ -7,8 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
+	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -23,8 +26,40 @@ import (
 // Config is the root of the Detour configuration file.
 type Config struct {
 	Server  ServerConfig           `yaml:"server"`
-	Docker  DockerConfig           `yaml:"docker"`
+	Docker  DockerProviders        `yaml:"docker,omitempty"`
 	Dynamic *dynamic.Configuration `yaml:"dynamic,omitempty"`
+}
+
+// DockerProviders is a map of named Docker provider configurations where empty
+// or null entries (e.g. `local:`) still receive DefaultDockerConfig().
+type DockerProviders map[string]DockerConfig
+
+// UnmarshalYAML decodes a YAML mapping of provider name -> DockerConfig.
+func (p *DockerProviders) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode && node.Tag == "!!null" {
+		*p = nil
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("line %d: docker must be a map of named providers", node.Line)
+	}
+	out := make(DockerProviders, len(node.Content)/2)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode, valNode := node.Content[i], node.Content[i+1]
+		var name string
+		if err := keyNode.Decode(&name); err != nil {
+			return err
+		}
+		d := DefaultDockerConfig()
+		if !(valNode.Kind == yaml.ScalarNode && valNode.Tag == "!!null") {
+			if err := valNode.Decode(&d); err != nil {
+				return err
+			}
+		}
+		out[name] = d
+	}
+	*p = out
+	return nil
 }
 
 // ServerConfig configures the HTTP provider endpoint and polling intervals.
@@ -35,7 +70,7 @@ type ServerConfig struct {
 	StaleDuration  Duration `yaml:"staleDuration"`
 }
 
-// DockerConfig configures the Docker and Swarm label sources.
+// DockerConfig configures one Docker and/or Swarm label provider.
 type DockerConfig struct {
 	// Containers enables collecting labels from Docker containers.
 	Containers bool `yaml:"containers"`
@@ -43,6 +78,7 @@ type DockerConfig struct {
 	Swarm bool `yaml:"swarm"`
 
 	Endpoint string           `yaml:"endpoint"`
+	Discover bool             `yaml:"discover"`
 	Timeout  Duration         `yaml:"timeout"`
 	Username string           `yaml:"username"`
 	Password string           `yaml:"password"`
@@ -71,6 +107,43 @@ const (
 	defaultDefaultRule  = "Host(`{{ normalize .Name }}`)"
 )
 
+// DefaultDockerConfig returns a DockerConfig populated with its default values.
+func DefaultDockerConfig() DockerConfig {
+	return DockerConfig{
+		Containers:  true,
+		Swarm:       false,
+		Endpoint:    defaultEndpoint,
+		Timeout:     Duration(5 * time.Second),
+		DefaultRule: defaultDefaultRule,
+	}
+}
+
+// UnmarshalYAML decodes node onto DefaultDockerConfig() while preserving KnownFields(true).
+func (d *DockerConfig) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode && node.Tag == "!!null" {
+		*d = DefaultDockerConfig()
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("line %d: docker provider configuration must be a mapping", node.Line)
+	}
+	type plain DockerConfig
+	out := plain(DefaultDockerConfig())
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	if err := enc.Encode(node); err != nil {
+		return err
+	}
+	_ = enc.Close()
+	dec := yaml.NewDecoder(&buf)
+	dec.KnownFields(true)
+	if err := dec.Decode(&out); err != nil {
+		return err
+	}
+	*d = DockerConfig(out)
+	return nil
+}
+
 // Default returns the configuration used when no file is given or when a
 // key is absent from it.
 func Default() *Config {
@@ -80,13 +153,6 @@ func Default() *Config {
 			EndpointPath:   defaultEndpointPath,
 			UpdateInterval: Duration(10 * time.Second),
 			StaleDuration:  Duration(time.Minute),
-		},
-		Docker: DockerConfig{
-			Containers:  true,
-			Swarm:       false,
-			Endpoint:    defaultEndpoint,
-			Timeout:     Duration(5 * time.Second),
-			DefaultRule: defaultDefaultRule,
 		},
 	}
 }
@@ -139,30 +205,48 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("server.staleDuration: must be greater than 0, got %s", s.StaleDuration.Std()))
 	}
 
-	d := c.Docker
-	if scheme, rest, ok := strings.Cut(d.Endpoint, "://"); !ok || rest == "" {
-		errs = append(errs, fmt.Errorf("docker.endpoint: %q must have the form scheme://address", d.Endpoint))
-	} else {
-		switch scheme {
-		case "unix", "tcp", "http", "https":
-		default:
-			errs = append(errs, fmt.Errorf("docker.endpoint: unsupported scheme %q (want unix, tcp, http or https)", scheme))
+	for _, name := range slices.Sorted(maps.Keys(c.Docker)) {
+		if strings.TrimSpace(name) == "" {
+			errs = append(errs, errors.New("docker: provider name must not be empty"))
+			continue
 		}
-	}
-	if d.Timeout <= 0 {
-		errs = append(errs, fmt.Errorf("docker.timeout: must be greater than 0, got %s", d.Timeout.Std()))
-	}
-	if (d.Username == "") != (d.Password == "") {
-		errs = append(errs, errors.New("docker.username and docker.password must be set together"))
-	}
-	if d.TLS != nil && (d.TLS.Cert == "") != (d.TLS.Key == "") {
-		errs = append(errs, errors.New("docker.tls.cert and docker.tls.key must be set together"))
-	}
-	if err := constraints.Validate(d.Constraints); err != nil {
-		errs = append(errs, fmt.Errorf("docker.constraints: %w", err))
-	}
-	if _, err := rule.Parse(d.DefaultRule); err != nil {
-		errs = append(errs, fmt.Errorf("docker.defaultRule: %w", err))
+		prefix := "docker." + name
+		d := c.Docker[name]
+		scheme, rest, ok := strings.Cut(d.Endpoint, "://")
+		if !ok || rest == "" {
+			errs = append(errs, fmt.Errorf("%s.endpoint: %q must have the form scheme://address", prefix, d.Endpoint))
+		} else {
+			switch scheme {
+			case "unix":
+				if d.Discover {
+					errs = append(errs, fmt.Errorf("%s.discover: cannot be used with unix:// endpoint %q", prefix, d.Endpoint))
+				}
+			case "tcp", "http", "https":
+				if d.Discover {
+					u, err := url.Parse(d.Endpoint)
+					if err != nil || u.Hostname() == "" {
+						errs = append(errs, fmt.Errorf("%s.endpoint: %q must include a hostname when discover is enabled", prefix, d.Endpoint))
+					}
+				}
+			default:
+				errs = append(errs, fmt.Errorf("%s.endpoint: unsupported scheme %q (want unix, tcp, http or https)", prefix, scheme))
+			}
+		}
+		if d.Timeout <= 0 {
+			errs = append(errs, fmt.Errorf("%s.timeout: must be greater than 0, got %s", prefix, d.Timeout.Std()))
+		}
+		if (d.Username == "") != (d.Password == "") {
+			errs = append(errs, fmt.Errorf("%s.username and %s.password must be set together", prefix, prefix))
+		}
+		if d.TLS != nil && (d.TLS.Cert == "") != (d.TLS.Key == "") {
+			errs = append(errs, fmt.Errorf("%s.tls.cert and %s.tls.key must be set together", prefix, prefix))
+		}
+		if err := constraints.Validate(d.Constraints); err != nil {
+			errs = append(errs, fmt.Errorf("%s.constraints: %w", prefix, err))
+		}
+		if _, err := rule.Parse(d.DefaultRule); err != nil {
+			errs = append(errs, fmt.Errorf("%s.defaultRule: %w", prefix, err))
+		}
 	}
 	return errors.Join(errs...)
 }

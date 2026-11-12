@@ -7,9 +7,11 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -29,6 +31,8 @@ const staticYAML = `
 server:
   updateInterval: 50ms
   staleDuration: 1s
+docker:
+  local: {}
 dynamic:
   http:
     services:
@@ -81,12 +85,16 @@ func newTestApp(t *testing.T, cfgYAML string, coll Collector, logOut io.Writer) 
 }
 
 func fixedFactory(coll Collector) Factory {
-	return func(cfg *config.Config) (Components, error) {
-		b, err := builder.New(cfg.Docker)
-		if err != nil {
-			return Components{}, err
+	return func(cfg *config.Config, _ *slog.Logger) (Components, error) {
+		var providers []Provider
+		for _, name := range slices.Sorted(maps.Keys(cfg.Docker)) {
+			b, err := builder.New(cfg.Docker[name])
+			if err != nil {
+				return Components{}, err
+			}
+			providers = append(providers, Provider{Name: name, Collector: coll, Builder: b})
 		}
-		return Components{Collector: coll, Builder: b, Compiler: compiler.New(cfg.Dynamic)}, nil
+		return Components{Providers: providers, Compiler: compiler.New(cfg.Dynamic)}, nil
 	}
 }
 
@@ -115,7 +123,7 @@ func TestRefreshMergesStaticAndDiscovered(t *testing.T) {
 }
 
 func TestRefreshBothOffPublishesStaticOnly(t *testing.T) {
-	cfgYAML := "docker:\n  containers: false\n  swarm: false\n" + staticYAML
+	cfgYAML := strings.Replace(staticYAML, "  local: {}", "  local:\n    containers: false\n    swarm: false", 1)
 	a, store := newTestApp(t, cfgYAML, NopCollector{}, io.Discard)
 	if err := a.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
@@ -123,6 +131,105 @@ func TestRefreshBothOffPublishesStaticOnly(t *testing.T) {
 	conf := decodeServed(t, store.Get())
 	if _, ok := conf.HTTP.Services["ext"]; !ok || len(conf.HTTP.Routers) != 0 {
 		t.Errorf("unexpected config: %+v", conf.HTTP)
+	}
+}
+
+func TestRefreshNoProvidersPublishesStaticOnly(t *testing.T) {
+	cfgYAML := strings.Replace(staticYAML, "docker:\n  local: {}\n", "", 1)
+	a, store := newTestApp(t, cfgYAML, NopCollector{}, io.Discard)
+	if err := a.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	conf := decodeServed(t, store.Get())
+	if _, ok := conf.HTTP.Services["ext"]; !ok || len(conf.HTTP.Routers) != 0 {
+		t.Errorf("unexpected config: %+v", conf.HTTP)
+	}
+}
+
+func TestRefreshMultipleProvidersMergeAndRespectOwnConfig(t *testing.T) {
+	doc := `
+server:
+  updateInterval: 50ms
+  staleDuration: 1s
+docker:
+  edge:
+    defaultRule: "Host(` + "`{{ normalize .Name }}.edge.test`" + `)"
+    exposedByDefault: true
+  internal:
+    defaultRule: "Host(` + "`{{ normalize .Name }}.int.test`" + `)"
+    exposedByDefault: false
+`
+	cfg, err := config.Parse([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	collectors := map[string]Collector{
+		"edge": &fakeCollector{containers: []docker.Container{
+			{
+				ID: "e1", Name: "api", ServiceName: "api", Source: docker.SourceContainer, Status: "running",
+				Networks: map[string]docker.Network{"bridge": {Name: "bridge", Addr: "10.1.0.2"}},
+				Ports:    []docker.Port{{Port: 8080, Proto: "tcp"}},
+			},
+			{
+				ID: "s1", Name: "shared", ServiceName: "shared", Source: docker.SourceContainer, Status: "running",
+				Labels:   map[string]string{"traefik.enable": "true", "traefik.http.routers.shared.rule": "Host(`shared.test`)"},
+				Networks: map[string]docker.Network{"bridge": {Name: "bridge", Addr: "10.1.0.9"}},
+				Ports:    []docker.Port{{Port: 80, Proto: "tcp"}},
+			},
+		}},
+		"internal": &fakeCollector{containers: []docker.Container{
+			{
+				// Unlabelled: must be skipped because internal.exposedByDefault is false.
+				ID: "i-skip", Name: "secret", ServiceName: "secret", Source: docker.SourceContainer, Status: "running",
+				Networks: map[string]docker.Network{"bridge": {Name: "bridge", Addr: "10.2.0.5"}},
+				Ports:    []docker.Port{{Port: 8080, Proto: "tcp"}},
+			},
+			{
+				ID: "i1", Name: "admin", ServiceName: "admin", Source: docker.SourceContainer, Status: "running",
+				Labels:   map[string]string{"traefik.enable": "true"},
+				Networks: map[string]docker.Network{"bridge": {Name: "bridge", Addr: "10.2.0.2"}},
+				Ports:    []docker.Port{{Port: 9000, Proto: "tcp"}},
+			},
+			{
+				ID: "s2", Name: "shared", ServiceName: "shared", Source: docker.SourceContainer, Status: "running",
+				Labels:   map[string]string{"traefik.enable": "true", "traefik.http.routers.shared.rule": "Host(`shared.test`)"},
+				Networks: map[string]docker.Network{"bridge": {Name: "bridge", Addr: "10.2.0.9"}},
+				Ports:    []docker.Port{{Port: 80, Proto: "tcp"}},
+			},
+		}},
+	}
+	factory := func(c *config.Config, _ *slog.Logger) (Components, error) {
+		var providers []Provider
+		for _, name := range slices.Sorted(maps.Keys(c.Docker)) {
+			b, err := builder.New(c.Docker[name])
+			if err != nil {
+				return Components{}, err
+			}
+			providers = append(providers, Provider{Name: name, Collector: collectors[name], Builder: b})
+		}
+		return Components{Providers: providers, Compiler: compiler.New(c.Dynamic)}, nil
+	}
+
+	store := &server.Store{}
+	a, err := New("", cfg, factory, store, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	conf := decodeServed(t, store.Get())
+	if r := conf.HTTP.Routers["api"]; r == nil || r.Rule != "Host(`api.edge.test`)" {
+		t.Errorf("edge router api = %+v", r)
+	}
+	if r := conf.HTTP.Routers["admin"]; r == nil || r.Rule != "Host(`admin.int.test`)" {
+		t.Errorf("internal router admin = %+v", r)
+	}
+	if _, ok := conf.HTTP.Routers["secret"]; ok {
+		t.Error("secret container should not be exposed on internal provider")
+	}
+	if svc := conf.HTTP.Services["shared"]; svc == nil || svc.LoadBalancer == nil || len(svc.LoadBalancer.Servers) != 2 {
+		t.Errorf("shared service servers = %+v, want 2 merged servers", svc)
 	}
 }
 

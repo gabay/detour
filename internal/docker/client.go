@@ -24,6 +24,13 @@ var Version = "dev"
 // DOCKER_* environment variables are deliberately ignored. API version
 // negotiation is left at the client default (enabled).
 func NewClient(cfg config.DockerConfig) (*client.Client, error) {
+	return NewClientWithServerName(cfg, "")
+}
+
+// NewClientWithServerName builds a Docker API client like NewClient, using
+// serverName as the TLS ServerName when non-empty (for example when connecting
+// to an IP resolved through DNS discovery).
+func NewClientWithServerName(cfg config.DockerConfig, serverName string) (*client.Client, error) {
 	host, scheme, err := endpointURL(cfg)
 	if err != nil {
 		return nil, err
@@ -31,11 +38,16 @@ func NewClient(cfg config.DockerConfig) (*client.Client, error) {
 
 	transport := &http.Transport{}
 	if cfg.TLS != nil {
-		tlsCfg, err := tlsClientConfig(*cfg.TLS)
+		tlsCfg, err := tlsClientConfig(*cfg.TLS, serverName)
 		if err != nil {
 			return nil, err
 		}
 		transport.TLSClientConfig = tlsCfg
+	} else if scheme == "https" && serverName != "" {
+		transport.TLSClientConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			ServerName: serverName,
+		}
 	}
 
 	// WithHTTPClient must precede WithHost, which configures the transport's dialer.
@@ -82,10 +94,11 @@ func endpointURL(cfg config.DockerConfig) (host, scheme string, err error) {
 	}
 }
 
-func tlsClientConfig(t config.TLSClientConfig) (*tls.Config, error) {
+func tlsClientConfig(t config.TLSClientConfig, serverName string) (*tls.Config, error) {
 	tlsCfg := &tls.Config{
 		MinVersion:         tls.VersionTLS12,
 		InsecureSkipVerify: t.InsecureSkipVerify, //nolint:gosec // explicitly requested by the operator
+		ServerName:         serverName,
 	}
 	if t.CA != "" {
 		pem, err := os.ReadFile(t.CA)

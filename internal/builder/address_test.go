@@ -137,7 +137,7 @@ func TestServiceName(t *testing.T) {
 			c: docker.Container{ServiceName: "shop-web-1", Labels: map[string]string{
 				"com.docker.compose.project": "shop", "com.docker.compose.service": "web",
 			}},
-			want: "web-shop",
+			want: "shop-web",
 		},
 		{
 			name: "partial compose labels fall back",

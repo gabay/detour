@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -81,9 +83,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		"endpointPath", cfg.Server.EndpointPath,
 		"updateInterval", cfg.Server.UpdateInterval.Std(),
 		"staleDuration", cfg.Server.StaleDuration.Std(),
-		"containers", cfg.Docker.Containers,
-		"swarm", cfg.Docker.Swarm,
-		"dockerEndpoint", cfg.Docker.Endpoint,
+		"dockerProviders", slices.Sorted(maps.Keys(cfg.Docker)),
 	)
 
 	go func() {
@@ -113,33 +113,60 @@ func run(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-// buildComponents creates the collector, builder and compiler for cfg. The Docker
-// daemon is not contacted here; the poller handles connection errors.
-func buildComponents(cfg *config.Config) (app.Components, error) {
-	coll, err := newCollector(cfg)
-	if err != nil {
-		return app.Components{}, err
-	}
-	b, err := builder.New(cfg.Docker)
-	if err != nil {
-		if closer, ok := coll.(io.Closer); ok {
-			_ = closer.Close()
+// buildComponents creates the collectors, builders and compiler for cfg. The Docker
+// daemons are not contacted here; the poller handles connection errors.
+func buildComponents(cfg *config.Config, logger *slog.Logger) (app.Components, error) {
+	names := slices.Sorted(maps.Keys(cfg.Docker))
+	providers := make([]app.Provider, 0, len(names))
+	closeBuilt := func() {
+		for _, p := range providers {
+			if closer, ok := p.Collector.(io.Closer); ok {
+				_ = closer.Close()
+			}
 		}
-		return app.Components{}, fmt.Errorf("builder: %w", err)
 	}
-	return app.Components{Collector: coll, Builder: b, Compiler: compiler.New(cfg.Dynamic)}, nil
+
+	for _, name := range names {
+		dcfg := cfg.Docker[name]
+		coll, err := newCollector(name, dcfg, logger)
+		if err != nil {
+			closeBuilt()
+			return app.Components{}, fmt.Errorf("docker.%s: %w", name, err)
+		}
+		b, err := builder.New(dcfg)
+		if err != nil {
+			if closer, ok := coll.(io.Closer); ok {
+				_ = closer.Close()
+			}
+			closeBuilt()
+			return app.Components{}, fmt.Errorf("docker.%s builder: %w", name, err)
+		}
+		providers = append(providers, app.Provider{
+			Name:      name,
+			Collector: coll,
+			Builder:   b,
+		})
+	}
+	return app.Components{Providers: providers, Compiler: compiler.New(cfg.Dynamic)}, nil
 }
 
 // newCollector creates the Docker collector only when a label source is enabled.
-func newCollector(cfg *config.Config) (app.Collector, error) {
-	if !cfg.Docker.Containers && !cfg.Docker.Swarm {
+func newCollector(name string, cfg config.DockerConfig, logger *slog.Logger) (app.Collector, error) {
+	if !cfg.Containers && !cfg.Swarm {
 		return app.NopCollector{}, nil
 	}
-	cli, err := docker.NewClient(cfg.Docker)
+	if cfg.Discover {
+		coll, err := docker.NewDiscoveringCollector(name, cfg, nil, nil, logger)
+		if err != nil {
+			return nil, fmt.Errorf("docker discovery: %w", err)
+		}
+		return coll, nil
+	}
+	cli, err := docker.NewClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("docker client: %w", err)
 	}
-	return docker.NewCollector(cli, cfg.Docker), nil
+	return docker.NewCollector(cli, cfg), nil
 }
 
 func newLogger(w io.Writer, level, format string) (*slog.Logger, error) {

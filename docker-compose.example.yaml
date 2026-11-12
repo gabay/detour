@@ -2,8 +2,8 @@
 #
 # Two variants are shown. Use "detour" with the socket mounted directly, or use
 # "detour-proxied", which talks to the Docker API through a read-only socket proxy.
-# Enable only one of them, and point docker.endpoint in detour's config at the
-# proxy (tcp://dockerproxy:2375) when using the proxied variant.
+# Enable only one of them, and point docker.<name>.endpoint in detour's config at
+# the proxy (tcp://dockerproxy:2375) when using the proxied variant.
 services:
   traefik:
     image: traefik:v3.5

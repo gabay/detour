@@ -33,15 +33,26 @@ func New(cfg config.DockerConfig) (*Builder, error) {
 // into one. Containers that cannot be turned into backends are logged and
 // skipped. The result is never nil.
 func (b *Builder) Build(containers []docker.Container) *dynamic.Configuration {
+	return Merge(b.BuildNamed("", containers), func(kind, name string, origins []string) {
+		slog.Error("conflicting definitions, removed from configuration", "kind", kind, "name", name, "origins", origins)
+	})
+}
+
+// BuildNamed builds the unmerged NamedConfiguration entries for containers.
+// When provider is non-empty, each entry's origin name is prefixed with
+// "<provider>/" so conflict reports identify which Docker provider produced it.
+func (b *Builder) BuildNamed(provider string, containers []docker.Container) []NamedConfiguration {
 	var named []NamedConfiguration
 	for _, c := range containers {
 		if conf, ok := b.containerConfig(c); ok {
-			named = append(named, NamedConfiguration{Name: ServiceName(c) + "-" + c.ID, Configuration: conf})
+			origin := ServiceName(c) + "-" + c.ID
+			if provider != "" {
+				origin = provider + "/" + origin
+			}
+			named = append(named, NamedConfiguration{Name: origin, Configuration: conf})
 		}
 	}
-	return Merge(named, func(kind, name string, origins []string) {
-		slog.Error("conflicting definitions, removed from configuration", "kind", kind, "name", name, "origins", origins)
-	})
+	return named
 }
 
 // containerConfig builds the configuration of one container, following Traefik's

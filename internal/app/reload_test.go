@@ -6,8 +6,10 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -45,19 +47,23 @@ type fakeFactory struct {
 	built []*trackedCollector
 }
 
-func (f *fakeFactory) factory(cfg *config.Config) (Components, error) {
+func (f *fakeFactory) factory(cfg *config.Config, _ *slog.Logger) (Components, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
 		return Components{}, f.err
 	}
-	b, err := builder.New(cfg.Docker)
-	if err != nil {
-		return Components{}, err
+	var providers []Provider
+	for _, name := range slices.Sorted(maps.Keys(cfg.Docker)) {
+		b, err := builder.New(cfg.Docker[name])
+		if err != nil {
+			return Components{}, err
+		}
+		c := &trackedCollector{}
+		f.built = append(f.built, c)
+		providers = append(providers, Provider{Name: name, Collector: c, Builder: b})
 	}
-	c := &trackedCollector{}
-	f.built = append(f.built, c)
-	return Components{Collector: c, Builder: b, Compiler: compiler.New(cfg.Dynamic)}, nil
+	return Components{Providers: providers, Compiler: compiler.New(cfg.Dynamic)}, nil
 }
 
 func (f *fakeFactory) count() int {
@@ -106,14 +112,15 @@ func TestReloadUnchangedIsNoop(t *testing.T) {
 func TestReloadDockerSwapsCollector(t *testing.T) {
 	a, f := newReloadApp(t, staticYAML, io.Discard)
 	old := f.built[0]
-	if err := a.Reload(context.Background(), mustParse(t, staticYAML+"docker:\n  network: other\n")); err != nil {
+	otherDocker := strings.Replace(staticYAML, "  local: {}", "  local:\n    network: other", 1)
+	if err := a.Reload(context.Background(), mustParse(t, otherDocker)); err != nil {
 		t.Fatal(err)
 	}
 	if !old.closed.Load() {
 		t.Error("old collector was not closed")
 	}
 	cur := f.built[len(f.built)-1]
-	if a.comp.Collector.(*trackedCollector) != cur || cur.calls.Load() == 0 {
+	if len(a.comp.Providers) != 1 || a.comp.Providers[0].Collector.(*trackedCollector) != cur || cur.calls.Load() == 0 {
 		t.Error("new collector is not in use after reload")
 	}
 }
@@ -161,7 +168,8 @@ func TestReloadFactoryErrorKeepsOldConfig(t *testing.T) {
 	a, f := newReloadApp(t, staticYAML, io.Discard)
 	old, oldCfg, oldSnap := f.built[0], a.cfg, a.store.Get()
 	f.err = errors.New("docker down")
-	if err := a.Reload(context.Background(), mustParse(t, staticYAML+"docker:\n  network: other\n")); err == nil {
+	otherDocker := strings.Replace(staticYAML, "  local: {}", "  local:\n    network: other", 1)
+	if err := a.Reload(context.Background(), mustParse(t, otherDocker)); err == nil {
 		t.Fatal("Reload succeeded despite factory error")
 	}
 	if a.cfg != oldCfg || a.store.Get() != oldSnap || old.closed.Load() {
@@ -200,7 +208,7 @@ func TestReloadConcurrentWithRefresh(t *testing.T) {
 	variants := []*config.Config{
 		mustParse(t, staticYAML),
 		mustParse(t, strings.Replace(staticYAML, "ext:", "ext2:", 1)),
-		mustParse(t, staticYAML+"docker:\n  network: other\n"),
+		mustParse(t, strings.Replace(staticYAML, "  local: {}", "  local:\n    network: other", 1)),
 	}
 	ctx := context.Background()
 	var wg sync.WaitGroup

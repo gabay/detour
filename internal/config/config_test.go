@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -19,11 +20,15 @@ func TestDefaults(t *testing.T) {
 		want.Server.UpdateInterval.Std() != 10*time.Second || want.Server.StaleDuration.Std() != time.Minute {
 		t.Fatalf("unexpected server defaults: %+v", want.Server)
 	}
-	if want.Docker.Endpoint != "unix:///var/run/docker.sock" || want.Docker.Timeout.Std() != 5*time.Second ||
-		want.Docker.DefaultRule != "Host(`{{ normalize .Name }}`)" || want.Docker.ExposedByDefault ||
-		!want.Docker.Containers || want.Docker.Swarm ||
-		want.Dynamic != nil || want.Docker.TLS != nil {
-		t.Fatalf("unexpected docker defaults: %+v", want.Docker)
+	if len(want.Docker) != 0 || want.Dynamic != nil {
+		t.Fatalf("unexpected defaults: docker=%+v dynamic=%+v", want.Docker, want.Dynamic)
+	}
+
+	d := DefaultDockerConfig()
+	if d.Endpoint != "unix:///var/run/docker.sock" || d.Timeout.Std() != 5*time.Second ||
+		d.DefaultRule != "Host(`{{ normalize .Name }}`)" || d.ExposedByDefault ||
+		!d.Containers || d.Swarm || d.Discover || d.TLS != nil {
+		t.Fatalf("unexpected docker provider defaults: %+v", d)
 	}
 
 	for name, data := range map[string]string{"empty": "", "comments only": "# nothing\n"} {
@@ -32,7 +37,7 @@ func TestDefaults(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Parse: %v", err)
 			}
-			if *got != *want {
+			if !reflect.DeepEqual(got, want) {
 				t.Errorf("Parse(%q) = %+v, want defaults", data, got)
 			}
 		})
@@ -45,14 +50,15 @@ func TestSourceBooleans(t *testing.T) {
 		yaml         string
 		wantC, wantS bool
 	}{
-		{"empty document keeps defaults", "", true, false},
-		{"both omitted keeps defaults", "docker:\n  endpoint: tcp://h:2375\n", true, false},
-		{"containers only", "docker:\n  containers: true\n  swarm: false\n", true, false},
-		{"swarm only", "docker:\n  containers: false\n  swarm: true\n", false, true},
-		{"both enabled", "docker:\n  containers: true\n  swarm: true\n", true, true},
-		{"both disabled", "docker:\n  containers: false\n  swarm: false\n", false, false},
-		{"swarm enabled, containers omitted keeps default on", "docker:\n  swarm: true\n", true, true},
-		{"containers disabled, swarm omitted keeps default off", "docker:\n  containers: false\n", false, false},
+		{"empty provider block keeps defaults", "docker:\n  local: {}\n", true, false},
+		{"null provider block keeps defaults", "docker:\n  local:\n", true, false},
+		{"both omitted keeps defaults", "docker:\n  local:\n    endpoint: tcp://h:2375\n", true, false},
+		{"containers only", "docker:\n  local:\n    containers: true\n    swarm: false\n", true, false},
+		{"swarm only", "docker:\n  local:\n    containers: false\n    swarm: true\n", false, true},
+		{"both enabled", "docker:\n  local:\n    containers: true\n    swarm: true\n", true, true},
+		{"both disabled", "docker:\n  local:\n    containers: false\n    swarm: false\n", false, false},
+		{"swarm enabled, containers omitted keeps default on", "docker:\n  local:\n    swarm: true\n", true, true},
+		{"containers disabled, swarm omitted keeps default off", "docker:\n  local:\n    containers: false\n", false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -60,13 +66,49 @@ func TestSourceBooleans(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Parse: %v", err)
 			}
-			if cfg.Docker.Containers != tt.wantC {
-				t.Errorf("Containers = %v, want %v", cfg.Docker.Containers, tt.wantC)
+			got := cfg.Docker["local"]
+			if got.Containers != tt.wantC {
+				t.Errorf("Containers = %v, want %v", got.Containers, tt.wantC)
 			}
-			if cfg.Docker.Swarm != tt.wantS {
-				t.Errorf("Swarm = %v, want %v", cfg.Docker.Swarm, tt.wantS)
+			if got.Swarm != tt.wantS {
+				t.Errorf("Swarm = %v, want %v", got.Swarm, tt.wantS)
+			}
+			if got.Timeout.Std() != 5*time.Second || got.DefaultRule != "Host(`{{ normalize .Name }}`)" {
+				t.Errorf("provider defaults lost: %+v", got)
 			}
 		})
+	}
+}
+
+func TestMultipleDockerProviders(t *testing.T) {
+	doc := `
+docker:
+  swarm-mgr:
+    containers: false
+    swarm: true
+    endpoint: tcp://socketproxy-mgr:2375
+    network: traefik-public
+  nodes:
+    containers: true
+    swarm: false
+    endpoint: tcp://tasks.socketproxy:2375
+    discover: true
+    exposedByDefault: true
+`
+	cfg, err := Parse([]byte(doc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Docker) != 2 {
+		t.Fatalf("len(Docker) = %d, want 2", len(cfg.Docker))
+	}
+	mgr := cfg.Docker["swarm-mgr"]
+	if mgr.Containers || !mgr.Swarm || mgr.Discover || mgr.Network != "traefik-public" || mgr.Timeout.Std() != 5*time.Second {
+		t.Errorf("swarm-mgr = %+v", mgr)
+	}
+	nodes := cfg.Docker["nodes"]
+	if !nodes.Containers || nodes.Swarm || !nodes.Discover || !nodes.ExposedByDefault || nodes.Endpoint != "tcp://tasks.socketproxy:2375" {
+		t.Errorf("nodes = %+v", nodes)
 	}
 }
 
@@ -153,19 +195,24 @@ func TestValidationErrors(t *testing.T) {
 	}{
 		{"negative update interval", "server:\n  updateInterval: -1s\n", "server.updateInterval"},
 		{"zero stale duration", "server:\n  staleDuration: 0s\n", "server.staleDuration"},
-		{"bad endpoint scheme", "docker:\n  endpoint: ftp://host:21\n", "docker.endpoint"},
-		{"endpoint without scheme", "docker:\n  endpoint: /var/run/docker.sock\n", "docker.endpoint"},
-		{"endpoint empty remainder", "docker:\n  endpoint: tcp://\n", "docker.endpoint"},
-		{"cert without key", "docker:\n  tls:\n    cert: /c.pem\n", "docker.tls.cert"},
-		{"key without cert", "docker:\n  tls:\n    key: /k.pem\n", "docker.tls.cert"},
-		{"user without password", "docker:\n  username: bob\n", "docker.username"},
-		{"password without user", "docker:\n  password: secret\n", "docker.username"},
+		{"bad endpoint scheme", "docker:\n  p:\n    endpoint: ftp://host:21\n", "docker.p.endpoint"},
+		{"endpoint without scheme", "docker:\n  p:\n    endpoint: /var/run/docker.sock\n", "docker.p.endpoint"},
+		{"endpoint empty remainder", "docker:\n  p:\n    endpoint: tcp://\n", "docker.p.endpoint"},
+		{"discover with unix socket", "docker:\n  p:\n    endpoint: unix:///var/run/docker.sock\n    discover: true\n", "docker.p.discover"},
+		{"discover without hostname", "docker:\n  p:\n    endpoint: tcp://:2375\n    discover: true\n", "docker.p.endpoint"},
+		{"cert without key", "docker:\n  p:\n    tls:\n      cert: /c.pem\n", "docker.p.tls.cert"},
+		{"key without cert", "docker:\n  p:\n    tls:\n      key: /k.pem\n", "docker.p.tls.cert"},
+		{"user without password", "docker:\n  p:\n    username: bob\n", "docker.p.username"},
+		{"password without user", "docker:\n  p:\n    password: secret\n", "docker.p.username"},
 		{"bad endpointPath", "server:\n  endpointPath: traefik\n", "server.endpointPath"},
 		{"endpointPath reserved for healthz", "server:\n  endpointPath: /healthz\n", "server.endpointPath"},
-		{"mode key is no longer supported", "docker:\n  mode: both\n", "mode"},
-		{"unparsable default rule", "docker:\n  defaultRule: 'Host(`{{ normalize .Name`)'\n", "docker.defaultRule"},
-		{"unknown rule function", "docker:\n  defaultRule: '{{ bogus .Name }}'\n", "docker.defaultRule"},
-		{"zero docker timeout", "docker:\n  timeout: 0s\n", "docker.timeout"},
+		{"unknown provider field", "docker:\n  p:\n    mode: both\n", "mode"},
+		{"legacy flat docker config rejected", "docker:\n  endpoint: tcp://h:2375\n", "docker provider configuration must be a mapping"},
+		{"docker list rejected", "docker:\n  - endpoint: tcp://h:2375\n", "docker must be a map of named providers"},
+		{"empty provider name", "docker:\n  \"\": {}\n", "provider name must not be empty"},
+		{"unparsable default rule", "docker:\n  p:\n    defaultRule: 'Host(`{{ normalize .Name`)'\n", "docker.p.defaultRule"},
+		{"unknown rule function", "docker:\n  p:\n    defaultRule: '{{ bogus .Name }}'\n", "docker.p.defaultRule"},
+		{"zero docker timeout", "docker:\n  p:\n    timeout: 0s\n", "docker.p.timeout"},
 		{"unknown field", "server:\n  bogus: 1\n", "bogus"},
 		{"unknown top-level field", "serverr:\n  listenAddr: \":1\"\n", "serverr"},
 	}
@@ -265,6 +312,9 @@ func TestExampleConfig(t *testing.T) {
 	cfg, err := LoadFile("../../config.example.yaml")
 	if err != nil {
 		t.Fatalf("LoadFile(example): %v", err)
+	}
+	if _, ok := cfg.Docker["local"]; !ok {
+		t.Fatalf("example docker.local provider missing: %+v", cfg.Docker)
 	}
 	if cfg.Dynamic == nil || cfg.Dynamic.HTTP == nil || cfg.Dynamic.HTTP.Routers["legacy-app"] == nil {
 		t.Fatalf("example dynamic section missing: %+v", cfg.Dynamic)

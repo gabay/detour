@@ -30,11 +30,14 @@ Durations accept Go duration strings (`"10s"`, `"2m"`) or a plain integer number
 
 ### `docker`
 
+`docker` is an optional map of named Docker/Swarm providers (`docker.<name>`). Omit it (or leave it empty) to publish only the static `dynamic` section. Each provider entry accepts:
+
 | Key                 | Default                       | Description |
 |---------------------|-------------------------------|-------------|
 | `containers`        | `true`                        | Collect labels from Docker containers. |
 | `swarm`             | `false`                       | Collect labels from Docker Swarm services. |
 | `endpoint`          | `unix:///var/run/docker.sock` | Docker API endpoint. Scheme must be `unix`, `tcp`, `http` or `https`. |
+| `discover`          | `false`                       | Resolve `endpoint`'s hostname via DNS on every poll and query every returned `A`/`AAAA` address (e.g. `tcp://tasks.socketproxy:2375`). Cannot be used with `unix://`. |
 | `timeout`           | `5s`                          | Timeout per Docker API request. Must be > 0. |
 | `username`          |                               | Basic auth for socket proxies. Set together with `password`. |
 | `password`          |                               | Basic auth password. Set together with `username`. |
@@ -49,13 +52,35 @@ Durations accept Go duration strings (`"10s"`, `"2m"`) or a plain integer number
 | `useBindPortIP`     | `false`                       | Use the IP from the published port binding instead of the container IP. |
 | `allowEmptyServices`| `false`                       | Keep services with no endpoints instead of dropping them. |
 
+#### Multiple providers and DNS discovery
+
+All configured providers are polled concurrently on every `server.updateInterval` and merged into one dynamic configuration. Services with the same name combine their backend servers into one load balancer, while identical routers and middlewares are deduplicated.
+
+When `discover: true` is set on a provider, Detour resolves the endpoint's hostname on each poll and queries all returned `A`/`AAAA` records concurrently (reusing HTTP clients for unchanged IPs and preserving the original hostname as the TLS `ServerName`). This is useful with a global Swarm socket-proxy service (`tcp://tasks.socketproxy:2375`) to collect node-local standalone containers across every node in a Swarm cluster:
+
+```yaml
+docker:
+  swarm-manager:
+    containers: false
+    swarm: true
+    endpoint: "tcp://socketproxy-manager:2375"
+    network: "traefik-public"
+
+  swarm-nodes:
+    containers: true
+    swarm: false
+    endpoint: "tcp://tasks.socketproxy:2375"
+    discover: true
+    network: "traefik-public"
+```
+
 #### Label sources
 
-`containers` and `swarm` are independent booleans that select the label sources. Any combination is valid; with both `false`, Detour publishes only the static `dynamic` section and contacts no Docker API. The keys are strict: a leftover `mode:` key is rejected at startup as an unknown field.
+`containers` and `swarm` are independent booleans that select the label sources for a provider. Any combination is valid; with both `false`, that provider contacts no Docker API. The keys are strict: unknown fields are rejected at startup.
 
 #### Default rule functions
 
-`docker.defaultRule` is a Go `text/template` executed with `.Name`, `.ContainerName` and `.Labels`. Available functions:
+`docker.<name>.defaultRule` is a Go `text/template` executed with `.Name`, `.ContainerName` and `.Labels`. Available functions:
 
 | Function | Example | Result |
 |----------|---------|--------|
@@ -89,11 +114,12 @@ Containers and Swarm services control their routing with these labels:
 
 For Swarm services, `traefik.docker.lbswarm` and `traefik.docker.network` are accepted as deprecated aliases, but a service must not mix `traefik.docker.*` and `traefik.swarm.*` labels.
 
-`docker.constraints` takes a Traefik-style expression built from `Label(name, value)` and `LabelRegex(name, regex)`, combined with `&&`, `||`, `!` and parentheses. An empty value matches all containers. The expression is validated at startup.
+`docker.<name>.constraints` takes a Traefik-style expression built from `Label(name, value)` and `LabelRegex(name, regex)`, combined with `&&`, `||`, `!` and parentheses. An empty value matches all containers. The expression is validated at startup.
 
 ```yaml
 docker:
-  constraints: 'Label("traefik.constraint", "public") || !LabelRegex("env", "^dev")'
+  local:
+    constraints: 'Label("traefik.constraint", "public") || !LabelRegex("env", "^dev")'
 ```
 
 ## Quick start
@@ -208,7 +234,7 @@ Equivalent flags: `--providers.http.endpoint=http://detour:7890/ --providers.htt
 ## How containers become routes
 
 - Each container (or Swarm entry) decodes its `traefik.*` labels into its own configuration; the results are merged in name order.
-- Without router labels, one router is created with the `docker.defaultRule` template (default ``Host(`{{ normalize .Name }}`)``), but only when the container defines at most one service. With no service labels, a default service is created.
+- Without router labels, one router is created with the provider's `defaultRule` template (default ``Host(`{{ normalize .Name }}`)``), but only when the container defines at most one service. With no service labels, a default service is created.
 - Server port: the `server.port` label, otherwise the lowest exposed port. A `server.url` label cannot be combined with a port or scheme.
 - Swarm: services without `lbswarm` route to each running task; with `traefik.swarm.lbswarm=true` they route to the service VIP. Entries without a network address are skipped.
 - Replicas of the same service (same name) merge into one load balancer with every replica as a server; identical routers are kept once. Conflicting definitions of the same router, service, etc. are removed and logged.
@@ -226,10 +252,10 @@ The compiler produces the configuration served to Traefik: the static `dynamic` 
 
 ## Docker access
 
-Detour reads the Docker Engine API with read-only `GET` requests only. Point `docker.endpoint` at either:
+Detour reads the Docker Engine API with read-only `GET` requests only. Point `docker.<name>.endpoint` at either:
 
 - a local socket: `unix:///var/run/docker.sock` (mount it read-only into the Detour container), or
-- a socket proxy: `tcp://socket-proxy:2375` (plain HTTP; with a `docker.tls` block it becomes HTTPS).
+- a socket proxy: `tcp://socket-proxy:2375` (plain HTTP; with a `tls` block it becomes HTTPS), or `tcp://tasks.socket-proxy:2375` with `discover: true` to query every replica of a Swarm socket-proxy service.
 
 Environment variables such as `DOCKER_HOST` are ignored; the config file is the only source.
 

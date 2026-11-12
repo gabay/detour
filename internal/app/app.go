@@ -40,16 +40,22 @@ func (NopCollector) Collect(context.Context) ([]docker.Container, error) {
 	return nil, nil
 }
 
-// Components are the parts built from one configuration. A reload replaces them as a unit.
-type Components struct {
+// Provider pairs one named Docker collector with its configuration builder.
+type Provider struct {
+	Name      string
 	Collector Collector
 	Builder   *builder.Builder
+}
+
+// Components are the parts built from one configuration. A reload replaces them as a unit.
+type Components struct {
+	Providers []Provider
 	Compiler  *compiler.Compiler
 }
 
 // Factory builds the Components for cfg. A collector that implements io.Closer is
 // closed when it is replaced, so a Factory must return a fresh collector on each call.
-type Factory func(cfg *config.Config) (Components, error)
+type Factory func(cfg *config.Config, logger *slog.Logger) (Components, error)
 
 // App runs the refresh loop and the HTTP server, and applies configuration reloads.
 type App struct {
@@ -79,7 +85,7 @@ func New(configPath string, cfg *config.Config, factory Factory, store *server.S
 	if logger == nil {
 		logger = slog.Default()
 	}
-	comp, err := factory(cfg)
+	comp, err := factory(cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("build components: %w", err)
 	}
@@ -123,13 +129,55 @@ func (a *App) refreshLocked(ctx context.Context) error {
 }
 
 func (a *App) refresh(ctx context.Context) error {
-	containers, err := a.comp.Collector.Collect(ctx)
-	if err != nil {
-		return fmt.Errorf("collect: %w", err)
+	type providerResult struct {
+		named []builder.NamedConfiguration
+		count int
+		err   error
 	}
-	discovered := a.comp.Builder.Build(containers)
+	results := make([]providerResult, len(a.comp.Providers))
+	var wg sync.WaitGroup
+	wg.Add(len(a.comp.Providers))
+	for i, p := range a.comp.Providers {
+		go func(i int, p Provider) {
+			defer wg.Done()
+			containers, err := p.Collector.Collect(ctx)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					a.logger.Warn("docker provider collection failed", "provider", p.Name, "err", err)
+				}
+				results[i] = providerResult{err: fmt.Errorf("provider %s: %w", p.Name, err)}
+				return
+			}
+			results[i] = providerResult{
+				named: p.Builder.BuildNamed(p.Name, containers),
+				count: len(containers),
+			}
+		}(i, p)
+	}
+	wg.Wait()
+
+	var (
+		errs            []error
+		allNamed        []builder.NamedConfiguration
+		totalContainers int
+	)
+	for _, r := range results {
+		if r.err != nil {
+			errs = append(errs, r.err)
+			continue
+		}
+		allNamed = append(allNamed, r.named...)
+		totalContainers += r.count
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("collect: %w", errors.Join(errs...))
+	}
+
+	discovered := builder.Merge(allNamed, func(kind, name string, origins []string) {
+		a.logger.Error("conflicting definitions, removed from configuration", "kind", kind, "name", name, "origins", origins)
+	})
 	conf, conflicts := a.comp.Compiler.Compile(discovered)
-	a.logger.Debug("configuration compiled", "containers", len(containers), "conflicts", len(conflicts))
+	a.logger.Debug("configuration compiled", "providers", len(a.comp.Providers), "containers", totalContainers, "conflicts", len(conflicts))
 	sn, err := server.NewSnapshot(conf, a.now())
 	if err != nil {
 		return fmt.Errorf("serialise: %w", err)
@@ -170,16 +218,16 @@ func (a *App) Reload(ctx context.Context, newCfg *config.Config) error {
 	comp, rebuilt := a.comp, false
 	if slices.ContainsFunc(changed, isComponentSection) {
 		var err error
-		if comp, err = a.factory(newCfg); err != nil {
+		if comp, err = a.factory(newCfg, a.logger); err != nil {
 			return fmt.Errorf("build components: %w", err)
 		}
 		rebuilt = true
 	}
-	oldCollector := a.comp.Collector
+	oldProviders := a.comp.Providers
 	a.comp, a.cfg = comp, newCfg
 	a.srv.SetConfig(newCfg.Server)
 	if rebuilt {
-		closeCollector(oldCollector, a.logger)
+		closeProviders(oldProviders, a.logger)
 	}
 
 	if newCfg.Server.ListenAddr != a.listenAddr {
@@ -197,7 +245,7 @@ func isComponentSection(section string) bool {
 // changedSections names the top-level sections, or server fields, that differ between old and cur.
 func changedSections(old, cur *config.Config) []string {
 	var changed []string
-	if !reflect.DeepEqual(old.Docker, cur.Docker) {
+	if !dockerConfigsEqual(old.Docker, cur.Docker) {
 		changed = append(changed, "docker")
 	}
 	if !reflect.DeepEqual(old.Dynamic, cur.Dynamic) {
@@ -219,10 +267,19 @@ func changedSections(old, cur *config.Config) []string {
 	return changed
 }
 
-func closeCollector(c Collector, logger *slog.Logger) {
-	if closer, ok := c.(io.Closer); ok {
-		if err := closer.Close(); err != nil {
-			logger.Warn("closing collector", "err", err)
+func dockerConfigsEqual(a, b config.DockerProviders) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	return reflect.DeepEqual(a, b)
+}
+
+func closeProviders(providers []Provider, logger *slog.Logger) {
+	for _, p := range providers {
+		if closer, ok := p.Collector.(io.Closer); ok {
+			if err := closer.Close(); err != nil {
+				logger.Warn("closing collector", "provider", p.Name, "err", err)
+			}
 		}
 	}
 }
@@ -291,7 +348,7 @@ func (a *App) Serve(ctx context.Context, ln net.Listener) error {
 	<-pollDone
 
 	a.mu.Lock()
-	closeCollector(a.comp.Collector, a.logger)
+	closeProviders(a.comp.Providers, a.logger)
 	a.mu.Unlock()
 	return runErr
 }
