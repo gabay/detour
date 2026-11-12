@@ -17,7 +17,7 @@ import (
 const (
 	healthPath      = "/healthz"
 	refreshPath     = "/refresh"
-	contentTypeYAML = "application/yaml; charset=utf-8"
+	contentTypeYAML = "text/yaml; charset=utf-8"
 	contentTypeJSON = "application/json; charset=utf-8"
 	msgNotYet       = "configuration not yet available"
 )
@@ -225,7 +225,7 @@ func acceptsGzip(values []string) bool {
 func acceptsJSON(values []string) bool {
 	m := parseAccept(values)
 	jsonQ := m["application/json"]
-	yamlQ := max(m["application/yaml"], m["application/x-yaml"], m["text/yaml"])
+	yamlQ := max(m["text/yaml"], m["application/x-yaml"], m["text/yaml"])
 	return jsonQ > 0 && jsonQ > yamlQ
 }
 

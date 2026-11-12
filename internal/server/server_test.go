@@ -93,13 +93,13 @@ func TestFormatSelection(t *testing.T) {
 		ctype  string
 		json   bool
 	}{
-		{"default yaml", "/", "", 200, "application/yaml; charset=utf-8", false},
+		{"default yaml", "/", "", 200, "text/yaml; charset=utf-8", false},
 		{"query json", "/?format=json", "", 200, "application/json; charset=utf-8", true},
-		{"query yaml", "/?format=yaml", "", 200, "application/yaml; charset=utf-8", false},
+		{"query yaml", "/?format=yaml", "", 200, "text/yaml; charset=utf-8", false},
 		{"accept json", "/", "application/json", 200, "application/json; charset=utf-8", true},
 		{"accept json with q", "/", "text/html, application/json;q=0.9", 200, "application/json; charset=utf-8", true},
-		{"accept yaml preferred", "/", "application/json;q=0.5, application/yaml", 200, "application/yaml; charset=utf-8", false},
-		{"query beats accept", "/?format=yaml", "application/json", 200, "application/yaml; charset=utf-8", false},
+		{"accept yaml preferred", "/", "application/json;q=0.5, text/yaml", 200, "text/yaml; charset=utf-8", false},
+		{"query beats accept", "/?format=yaml", "application/json", 200, "text/yaml; charset=utf-8", false},
 		{"unknown format", "/?format=xml", "", 400, "", false},
 	}
 	for _, tt := range tests {

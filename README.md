@@ -139,7 +139,7 @@ Served at `server.endpointPath` (default `/`):
 
 | Request | Result |
 |---------|--------|
-| `GET /` | YAML, `Content-Type: application/yaml; charset=utf-8` |
+| `GET /` | YAML, `Content-Type: text/yaml; charset=utf-8` |
 | `GET /?format=json` | JSON, `application/json; charset=utf-8` |
 | `GET /?format=yaml` | YAML explicitly |
 | `GET /` with `Accept: application/json` | JSON (ignored when `format` is set) |
